@@ -134,6 +134,19 @@ tests/
 pytest
 ```
 
+## Swift migration (in progress)
+
+To start moving server-side logic from Python to Swift, this repository now
+includes a small Swift package at `swift-backend/` that mirrors shared response
+models and the `/health` payload contract.
+
+Run Swift tests:
+
+```bash
+cd swift-backend
+swift test
+```
+
 ## Configuration reference
 
 All settings can be overridden via environment variables or a `.env` file.
