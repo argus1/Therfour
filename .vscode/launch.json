@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Therfour}/swift-backend",
+            "name": "Debug swift-backend (swift-backend)",
+            "target": "swift-backend",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug swift-backend (swift-backend)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Therfour}/swift-backend",
+            "name": "Release swift-backend (swift-backend)",
+            "target": "swift-backend",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release swift-backend (swift-backend)"
+        }
+    ]
+}

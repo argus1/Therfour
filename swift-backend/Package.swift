@@ -5,6 +5,9 @@ import PackageDescription
 
 let package = Package(
     name: "swift-backend",
+    platforms: [
+        .macOS(.v12),
+    ],
     products: [
         .executable(name: "swift-backend", targets: ["swift-backend"]),
     ],
