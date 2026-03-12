@@ -2,8 +2,8 @@
 
 **Multilingual Voice Agent for Harm Reduction**
 
-Therfour is a modular, open-source backend for telephone-based harm-reduction
-helplines.  It connects to a phone call via
+Therfour is a modular, open-source backend for telephone-based [harm-reduction
+and harm-prevention](https://doi.org/10.1080/13811118.2020.1823916) helplines.  It connects to a phone call via
 [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams), runs
 all AI inference locally, and returns synthesised speech – no data ever leaves
 your infrastructure.
