@@ -32,6 +32,18 @@ class Settings(BaseSettings):
     whisper_compute_type: str = "int8"
     # None → auto-detect; set to e.g. "en" to force a language
     whisper_language: Optional[str] = None
+    whisper_fallback_enabled: bool = True
+    whisper_primary_beam_size: int = 5
+    whisper_fallback_beam_size: int = 1
+    stt_min_text_characters: int = 2
+    stt_min_quality_score: float = 0.25
+
+    # ── VAD – Silero ─────────────────────────────────────────────────────────
+    vad_enabled: bool = True
+    vad_threshold: float = 0.5
+    vad_min_silence_ms: int = 300
+    vad_speech_pad_ms: int = 96
+    vad_preroll_ms: int = 96
 
     # ── TTS – Piper ──────────────────────────────────────────────────────────
     piper_model_path: str = "models/en_US-lessac-medium.onnx"

@@ -13,3 +13,5 @@ htmlcov/
 models/
 *.onnx
 *.onnx.json
+benchmarks/results/
+third_party/audio_quality_testing_samples/
