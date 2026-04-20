@@ -1,11 +1,5 @@
 # ADR-TTS-001: TTS Engine Decision for TherFour
 
-Date: 2026-04-20
-Author: Engineering
-Status: Proposed
-
----
-
 ## Context
 
 TherFour is a self-hosted, privacy-first harm-reduction telephone helpline.
