@@ -3,7 +3,7 @@
 **Multilingual Voice Agent for Harm Reduction**
 
 Therfour is a modular, open-source backend for telephone-based [harm-reduction
-and harm-prevention](https://doi.org/10.1080/13811118.2020.1823916) helplines.  It connects to a phone call via
+and harm-prevention](https://doi.org/10.1080/13811118.2020.1823916) helplines. It connects to a phone call via
 [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams), runs
 all AI inference locally, and returns synthesised speech – no data ever leaves
 your infrastructure.
@@ -31,23 +31,24 @@ Caller ──► Twilio ──► /calls/inbound (TwiML)
 
 ## Tech stack
 
-| Layer       | Library / Tool                                         |
-|-------------|--------------------------------------------------------|
-| Web server  | [FastAPI](https://fastapi.tiangolo.com) + Uvicorn      |
+| Layer       | Library / Tool                                                          |
+| ----------- | ----------------------------------------------------------------------- |
+| Web server  | [FastAPI](https://fastapi.tiangolo.com) + Uvicorn                       |
 | Telephony   | [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams) |
-| STT         | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) |
-| TTS         | [Piper](https://github.com/rhasspy/piper)              |
-| LLM         | [Ollama](https://ollama.com) (local, any model)        |
-| Audio codec | Python `audioop` / `audioop-lts` + SciPy               |
+| STT         | [faster-whisper](https://github.com/SYSTRAN/faster-whisper)             |
+| VAD         | [silero-vad](https://github.com/snakers4/silero-vad)                    |
+| TTS         | [Piper](https://github.com/rhasspy/piper)                               |
+| LLM         | [Ollama](https://ollama.com) (local, any model)                         |
+| Audio codec | Python `audioop` / `audioop-lts` + SciPy                                |
 
 ## Quick start
 
 ### Prerequisites
 
-* Python 3.11+
-* [Piper binary](https://github.com/rhasspy/piper/releases) on your `$PATH`
-* [Ollama](https://ollama.com) running locally with your chosen model pulled
-* A Twilio account with a voice-capable phone number
+- Python 3.11+
+- [Piper binary](https://github.com/rhasspy/piper/releases) on your `$PATH`
+- [Ollama](https://ollama.com) running locally with your chosen model pulled
+- A Twilio account with a voice-capable phone number
 
 ### 1 – Install Python dependencies
 
@@ -96,7 +97,7 @@ cp .env.example .env   # edit as above
 docker compose up --build
 ```
 
-Ollama and the application container are started together.  Pull your model
+Ollama and the application container are started together. Pull your model
 inside the ollama container after first boot:
 
 ```bash
@@ -134,6 +135,28 @@ tests/
 pytest
 ```
 
+## STT Benchmark Harness
+
+To compare `small` vs `distil-large-v3` on telephony-focused samples, use the benchmark harness in `benchmarks/`.
+
+The harness uses:
+
+- `https://github.com/voxserv/audio_quality_testing_samples`
+
+and writes machine-readable outputs to `benchmarks/results/`.
+
+Run from repo root:
+
+```bash
+/Users/argussun/Documents/Therfour/.venv/bin/python benchmarks/compare_whisper_models.py \
+     --models small distil-large-v3 \
+     --subdir testaudio \
+     --device auto \
+     --repeats 3
+```
+
+For more options and reproducibility guidance, see `benchmarks/README.md`.
+
 ## Swift migration (in progress)
 
 To start moving server-side logic from Python to Swift, this repository now
@@ -152,13 +175,23 @@ swift test
 All settings can be overridden via environment variables or a `.env` file.
 See `.env.example` for the full list with descriptions.
 
-| Variable              | Default                          | Description                               |
-|-----------------------|----------------------------------|-------------------------------------------|
-| `WHISPER_MODEL`       | `small`                          | faster-whisper model size                 |
-| `WHISPER_LANGUAGE`    | *(auto-detect)*                  | Pin transcription language                |
-| `PIPER_BINARY`        | `piper`                          | Path to the Piper executable              |
-| `PIPER_MODEL_PATH`    | `models/en_US-lessac-medium.onnx`| Piper voice model                         |
-| `OLLAMA_MODEL`        | `llama3.2:3b`                    | Ollama model tag                          |
-| `OLLAMA_BASE_URL`     | `http://localhost:11434`         | Ollama API base URL                       |
-| `SILENCE_TIMEOUT_S`   | `1.5`                            | Seconds of silence before turn processing |
-| `PUBLIC_HOST`         | `localhost`                      | Hostname used in the TwiML `<Stream>` URL |
+| Variable                     | Default                           | Description                                |
+| ---------------------------- | --------------------------------- | ------------------------------------------ |
+| `WHISPER_MODEL`              | `small`                           | faster-whisper model size                  |
+| `WHISPER_LANGUAGE`           | _(auto-detect)_                   | Pin transcription language                 |
+| `WHISPER_FALLBACK_ENABLED`   | `true`                            | Enables secondary Whisper decode attempt   |
+| `WHISPER_PRIMARY_BEAM_SIZE`  | `5`                               | Beam size for primary decode attempt       |
+| `WHISPER_FALLBACK_BEAM_SIZE` | `1`                               | Beam size for fallback decode attempt      |
+| `STT_MIN_TEXT_CHARACTERS`    | `2`                               | Minimum transcript length before accept    |
+| `STT_MIN_QUALITY_SCORE`      | `0.25`                            | Minimum heuristic quality score            |
+| `VAD_ENABLED`                | `true`                            | Enables Silero streaming VAD segmentation  |
+| `VAD_THRESHOLD`              | `0.5`                             | Speech probability threshold               |
+| `VAD_MIN_SILENCE_MS`         | `300`                             | Silence duration required to close turn    |
+| `VAD_SPEECH_PAD_MS`          | `96`                              | Speech padding around detected boundaries  |
+| `VAD_PREROLL_MS`             | `96`                              | Audio preroll retained before speech start |
+| `PIPER_BINARY`               | `piper`                           | Path to the Piper executable               |
+| `PIPER_MODEL_PATH`           | `models/en_US-lessac-medium.onnx` | Piper voice model                          |
+| `OLLAMA_MODEL`               | `llama3.2:3b`                     | Ollama model tag                           |
+| `OLLAMA_BASE_URL`            | `http://localhost:11434`          | Ollama API base URL                        |
+| `SILENCE_TIMEOUT_S`          | `1.5`                             | Seconds of silence before turn processing  |
+| `PUBLIC_HOST`                | `localhost`                       | Hostname used in the TwiML `<Stream>` URL  |

@@ -42,7 +42,16 @@ private final class StubSynthesizer: SpeechSynthesizer, @unchecked Sendable {
 @Test
 func processTurnRunsSTTToLLMToTTS() async throws {
     let stt = StubTranscriber(
-        result: TranscriptionResult(text: "I need clean needles", language: "en", confidence: 0.98)
+        result: TranscriptionResult(
+            text: "I need clean needles",
+            language: "en",
+            confidence: 0.98,
+            languageConfidence: 0.98,
+            transcriptQualityScore: 0.95,
+            backendName: "faster-whisper",
+            fallbackUsed: false,
+            failureReason: ""
+        )
     )
     let llm = StubResponder(
         reply: "I can share nearby exchange resources and overdose safety steps.")
@@ -64,7 +73,16 @@ func processTurnRunsSTTToLLMToTTS() async throws {
 @Test
 func processTurnRejectsEmptyTranscription() async {
     let stt = StubTranscriber(
-        result: TranscriptionResult(text: "   ", language: "en", confidence: 0.0)
+        result: TranscriptionResult(
+            text: "   ",
+            language: "en",
+            confidence: 0.0,
+            languageConfidence: 0.0,
+            transcriptQualityScore: 0.0,
+            backendName: "faster-whisper",
+            fallbackUsed: false,
+            failureReason: "no_speech"
+        )
     )
     let llm = StubResponder(reply: "unused")
     let tts = StubSynthesizer()
@@ -83,7 +101,16 @@ func processTurnRejectsEmptyTranscription() async {
 @Test
 func processTurnTrimsConversationToLimit() async throws {
     let stt = StubTranscriber(
-        result: TranscriptionResult(text: "hello", language: "en", confidence: 1.0)
+        result: TranscriptionResult(
+            text: "hello",
+            language: "en",
+            confidence: 1.0,
+            languageConfidence: 1.0,
+            transcriptQualityScore: 1.0,
+            backendName: "faster-whisper",
+            fallbackUsed: false,
+            failureReason: ""
+        )
     )
     let llm = StubResponder(reply: "hi")
     let tts = StubSynthesizer()

@@ -201,6 +201,229 @@ If only 1 developer is available, execute in the same sequence with reduced para
 - RAG/LLM: align context assembly and prompt injection strategy in `app/services/llm.py`.
 - Telephony turn integration updates in `app/services/telephony.py` as needed.
 
+### STT Input Normalization Plan
+
+#### Design Goal
+
+Build an open-source, low-latency STT path for conversational hotline calls that:
+
+- reduces false turn triggers from silence/noise
+- improves transcript reliability under telephony audio constraints
+- keeps deployment practical for a wide user base
+- uses GPU acceleration when available without making GPU mandatory
+
+#### Recommended Architecture
+
+Default recommendation: use all three components, but not in one serial blocking path.
+
+- Silero VAD as the always-on speech gate and utterance boundary detector
+- Whisper as the final transcript engine for quality and multilingual robustness
+- Sherpa-ONNX as optional low-latency streaming/CPU-safe fallback, not a mandatory inline step for every finalized turn
+
+This means the preferred production pattern is:
+
+1. ingest Twilio audio and normalize codec/sample rate
+2. run Silero VAD on short rolling frames
+3. buffer only voiced spans and finalize turns with VAD hangover logic
+4. send finalized speech spans to Whisper for the canonical transcript
+5. optionally use Sherpa-ONNX for live partials, quick confirmation, or fallback when Whisper is degraded/unavailable
+
+#### Feasibility Judgment
+
+Using all three is feasible if responsibilities are separated.
+
+- Feasible: Silero VAD + Whisper + Sherpa-ONNX as layered components
+- Not recommended: running Sherpa-ONNX and Whisper serially for every turn by default, because this adds latency and operational complexity without guaranteed user-visible benefit
+
+If sprint or complexity limits force prioritization, the order should be:
+
+1. Silero VAD
+2. Whisper hardening
+3. Sherpa-ONNX fallback/streaming path
+
+Rationale:
+
+- Silero VAD directly improves latency and turn quality by shrinking silence timeout dependence.
+- Whisper is already integrated and is the fastest route to better transcript quality with the least architectural churn.
+- Sherpa-ONNX is valuable, especially for streaming partials and CPU fallback, but is a second integration surface and should not block sprint 1 parity work.
+
+#### Component Roles
+
+##### Silero VAD
+
+Use Silero VAD as the primary input-normalization control plane.
+
+- Detect speech onset and end on 20-30 ms frames
+- Replace or greatly reduce fixed `silence_timeout_s` dependence
+- Reject no-speech turns before STT decode
+- Trim leading/trailing silence before transcription
+- Emit structured VAD metadata for observability:
+  - speech_started_at_ms
+  - speech_ended_at_ms
+  - voiced_duration_ms
+  - dropped_as_no_speech
+
+Why first:
+
+- highest latency win for hotline interaction
+- open-source and widely used
+- model-light compared with full STT backends
+
+##### Whisper
+
+Keep Whisper as the canonical final-transcript backend.
+
+- Continue using faster-whisper for server deployment
+- Prefer CUDA execution on GPU-enabled servers
+- Keep CPU mode available for broad OSS adoption
+- Add decode policy rather than single-pass transcription:
+  - primary decode with pinned/default language policy
+  - fallback decode with relaxed thresholds or auto-language mode
+  - transcript quality gate before LLM handoff
+
+Recommended server defaults:
+
+- GPU servers: faster-whisper with a latency-focused model class such as `small`, `distil-large-v3`, or other benchmarked low-latency option
+- CPU-only installs: smaller Whisper class with explicit documentation that accuracy is lower but supported
+
+Whisper should own:
+
+- final transcript text
+- language detection metadata
+- transcript quality heuristics
+
+##### Sherpa-ONNX
+
+Adopt Sherpa-ONNX as an optional path with two valid roles.
+
+Role A: streaming partial transcript engine
+
+- Produce low-latency partial text while audio is still arriving
+- Improve responsiveness if the product later supports interruption, barge-in, or live agent assistance
+
+Role B: fallback backend
+
+- Provide a CPU-friendly open-source fallback when Whisper GPU is unavailable, overloaded, or failing repeatedly
+- Offer session-sticky fallback behavior after repeated Whisper failures
+
+Do not make Sherpa-ONNX required for sprint 1 final-turn transcription unless benchmarks prove it beats the existing Whisper path on both latency and transcript quality for hotline audio.
+
+#### Latency Strategy for Hotline Use
+
+Because the agent is conversational and phone-based, the plan should optimize end-of-utterance latency, not only raw model decode speed.
+
+Primary latency actions:
+
+- move from fixed silence timeout toward VAD-based endpointing
+- keep audio in rolling buffers rather than waiting for coarse silence windows
+- avoid double-decoding every finalized turn unless fallback is needed
+- use smaller or distilled Whisper variants by default on server
+- keep model warm and reuse process-local workers
+
+Target operational budgets for sprint validation:
+
+- end-of-speech to transcript start: under 300 ms with VAD finalization
+- finalized transcript ready: under 900 ms P50 and under 1500 ms P95 on target GPU servers
+- no-speech false turn rate reduced materially versus fixed-timeout baseline
+
+#### Implementation Order
+
+##### Phase 1 - Ship This First
+
+- Add Silero VAD-based speech segmentation in `app/services/telephony.py`
+- Pass trimmed voiced audio into `app/services/stt.py`
+- Add Whisper decode retry/fallback policy in `app/services/stt.py`
+- Update schemas/contracts for explicit transcript quality and failure reason fields
+- Add tests for no-speech rejection, trimmed input handling, and fallback decode behavior
+
+Phase 1 outcome:
+
+- lowest-risk, highest-value improvement
+- no new primary STT backend required
+
+##### Phase 2 - Add Optional Sherpa-ONNX
+
+- Introduce Sherpa-ONNX backend abstraction behind a shared STT interface
+- Use it first as:
+  - session fallback backend, or
+  - optional partial/live transcript backend
+- Add config flags so deployments can enable or disable Sherpa independently
+
+Phase 2 outcome:
+
+- broader hardware compatibility
+- lower-latency partials if product direction requires them
+
+##### Phase 3 - Benchmark and Promote by Policy
+
+- Compare:
+  - VAD + Whisper
+  - VAD + Sherpa only
+  - VAD + Sherpa partials + Whisper final
+- Benchmark on telephony-quality audio and noisy hotline samples
+- Choose production defaults based on measured latency, transcript quality, and failure rate
+
+#### Required Contract Changes
+
+Python and Swift contracts should make STT state explicit.
+
+- Rename ambiguous confidence semantics if needed:
+  - `confidence` should not mean language ID confidence if downstream users assume transcript confidence
+- Add optional metadata fields for:
+  - `language_confidence`
+  - `transcript_quality_score`
+  - `backend_name`
+  - `fallback_used`
+  - `failure_reason`
+  - `vad_voiced_duration_ms`
+
+Files to update:
+
+- `app/models/schemas.py`
+- `swift-backend/Sources/swift-backend/VoiceContracts.swift`
+
+#### Implementation Targets in This Repo
+
+- `app/core/config.py`
+  - add feature flags and backend selection settings for Silero VAD and Sherpa-ONNX
+- `app/services/telephony.py`
+  - add frame buffering, VAD gating, and endpoint logic
+- `app/services/stt.py`
+  - add backend abstraction, Whisper retry policy, and transcript quality gating
+- `tests/test_stt.py`
+  - add fallback and quality-gate tests
+- `tests/test_telephony.py`
+  - add VAD segmentation and no-speech drop coverage
+
+#### Decision Recommendation
+
+Sprint 1 production recommendation:
+
+- Ship Silero VAD + Whisper as the default normalized STT path
+- Keep Sherpa-ONNX behind a feature flag for fallback and streaming experiments
+
+Why this is the right default for TherFour:
+
+- preserves open-source deployability
+- matches the current architecture and codebase maturity
+- improves latency where the user actually feels it
+- avoids unnecessary double-decode overhead on every call turn
+- leaves room for Sherpa-ONNX to add value where it is strongest
+
+#### Acceptance Criteria
+
+- VAD replaces most fixed silence-only turn detection logic
+- no-speech turns are rejected before LLM invocation
+- Whisper supports at least one fallback decode strategy
+- STT result includes explicit backend and failure metadata
+- Sherpa-ONNX can be enabled as fallback or partial-transcript path without changing public API shape
+- tests cover:
+  - speech/no-speech segmentation
+  - final-turn trimming
+  - Whisper fallback decode
+  - session-sticky fallback activation
+  - structured STT failure reporting
+
 #### Day 9: Integration and Performance Checks
 
 - Run end-to-end call-turn scenarios across API and Swift backend integration points.

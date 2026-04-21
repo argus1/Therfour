@@ -1,0 +1,4 @@
+model,file_path,scenario,noise_file,target_snr_db,duration_s,elapsed_s,rtf,text_chars,text_words,language,language_probability
+small,third_party/audio_quality_testing_samples/testaudio/16000/test01_20s.wav,clean,,,24.0,0.1564,0.0065,292,54,en,1.0
+small,third_party/audio_quality_testing_samples/testaudio/16000/test01_20s.wav,edge_very_low_speech,,,24.0,0.0609,0.0025,291,54,en,1.0
+small,third_party/audio_quality_testing_samples/testaudio/16000/test01_20s.wav,edge_clipped,,,24.0,0.0606,0.0025,292,54,en,1.0
