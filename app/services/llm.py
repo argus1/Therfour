@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import AsyncIterator
 
 import httpx
 
 from app.core.config import settings
+from app.services.observability import emit_stage_event
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ HARM_REDUCTION_SYSTEM_PROMPT = (
 
 async def generate(messages: list[dict]) -> str:
     """Send *messages* to Ollama and return the assistant reply as a string."""
+    start = time.perf_counter()
     payload = {
         "model": settings.ollama_model,
         "messages": [
@@ -45,14 +48,39 @@ async def generate(messages: list[dict]) -> str:
         ],
         "stream": False,
     }
-    async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
-        resp = await client.post(
-            f"{settings.ollama_base_url}/api/chat",
-            json=payload,
+    try:
+        async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
+            resp = await client.post(
+                f"{settings.ollama_base_url}/api/chat",
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception:
+        emit_stage_event(
+            stage="rag",
+            status="failure",
+            latency_ms=(time.perf_counter() - start) * 1000.0,
+            failure_reason="generation_error",
+            message_count=len(messages),
+            backend_name="ollama",
+            model=settings.ollama_model,
         )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["message"]["content"]
+        raise
+
+    content = data.get("message", {}).get("content", "")
+    failure_reason = "" if content.strip() else "empty_response"
+    emit_stage_event(
+        stage="rag",
+        status="success" if not failure_reason else "dropped",
+        latency_ms=(time.perf_counter() - start) * 1000.0,
+        failure_reason=failure_reason,
+        message_count=len(messages),
+        response_chars=len(content),
+        backend_name="ollama",
+        model=settings.ollama_model,
+    )
+    return content
 
 
 async def generate_stream(messages: list[dict]) -> AsyncIterator[str]:

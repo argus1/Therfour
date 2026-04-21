@@ -44,3 +44,48 @@ def test_system_prompt_contains_harm_reduction_keywords() -> None:
 def test_system_prompt_mentions_multilingual() -> None:
     """The system prompt must instruct the model to be multilingual."""
     assert "multilingual" in llm_service.HARM_REDUCTION_SYSTEM_PROMPT.lower()
+
+
+@pytest.mark.asyncio
+async def test_generate_emits_observability_event_on_success() -> None:
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json.return_value = {
+        "message": {"content": "Please stay safe and call 911 if needed."}
+    }
+
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.llm.httpx.AsyncClient") as mock_cls, patch(
+        "app.services.llm.emit_stage_event"
+    ) as emit_mock:
+        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        await llm_service.generate([{"role": "user", "content": "What is naloxone?"}])
+
+    emit_mock.assert_called_once()
+    assert emit_mock.call_args.kwargs["stage"] == "rag"
+    assert emit_mock.call_args.kwargs["status"] == "success"
+    assert emit_mock.call_args.kwargs["failure_reason"] == ""
+
+
+@pytest.mark.asyncio
+async def test_generate_emits_observability_event_on_failure() -> None:
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(side_effect=RuntimeError("request failed"))
+
+    with patch("app.services.llm.httpx.AsyncClient") as mock_cls, patch(
+        "app.services.llm.emit_stage_event"
+    ) as emit_mock:
+        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with pytest.raises(RuntimeError, match="request failed"):
+            await llm_service.generate([{"role": "user", "content": "hello"}])
+
+    emit_mock.assert_called_once()
+    assert emit_mock.call_args.kwargs["stage"] == "rag"
+    assert emit_mock.call_args.kwargs["status"] == "failure"
+    assert emit_mock.call_args.kwargs["failure_reason"] == "generation_error"

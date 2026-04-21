@@ -164,3 +164,26 @@ async def test_transcribe_raises_when_all_attempts_fail() -> None:
     ):
         with pytest.raises(RuntimeError, match="all attempts failed"):
             await stt_service.transcribe(audio, language="en")
+
+
+@pytest.mark.asyncio
+async def test_transcribe_emits_observability_event_on_empty_text() -> None:
+    audio = np.zeros(16000, dtype=np.float32)
+
+    mock_info = MagicMock()
+    mock_info.language = "en"
+    mock_info.language_probability = 0.5
+
+    mock_model = MagicMock()
+    mock_model.transcribe.return_value = ([], mock_info)
+
+    with patch("app.services.stt._load_model", return_value=mock_model), patch(
+        "app.services.stt.emit_stage_event"
+    ) as emit_mock:
+        result = await stt_service.transcribe(audio)
+
+    assert result.failure_reason == "no_speech"
+    emit_mock.assert_called_once()
+    assert emit_mock.call_args.kwargs["stage"] == "stt"
+    assert emit_mock.call_args.kwargs["status"] == "dropped"
+    assert emit_mock.call_args.kwargs["failure_reason"] == "no_speech"

@@ -10,12 +10,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
 import numpy as np
 
 from app.core.config import settings
+from app.services.observability import emit_stage_event
 
 logger = logging.getLogger(__name__)
 
@@ -55,5 +57,30 @@ def _synthesize(text: str) -> np.ndarray:
 
 async def synthesize(text: str) -> np.ndarray:
     """Synthesize *text* to speech, returning float32 PCM at :data:`PIPER_SAMPLE_RATE` Hz."""
+    start = time.perf_counter()
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_executor, partial(_synthesize, text))
+    try:
+        samples = await loop.run_in_executor(_executor, partial(_synthesize, text))
+    except Exception:
+        emit_stage_event(
+            stage="tts",
+            status="failure",
+            latency_ms=(time.perf_counter() - start) * 1000.0,
+            failure_reason="synthesis_error",
+            text_chars=len(text),
+            backend_name="piper",
+        )
+        raise
+
+    failure_reason = "" if len(samples) > 0 else "empty_audio"
+    emit_stage_event(
+        stage="tts",
+        status="success" if not failure_reason else "dropped",
+        latency_ms=(time.perf_counter() - start) * 1000.0,
+        failure_reason=failure_reason,
+        text_chars=len(text),
+        sample_rate=PIPER_SAMPLE_RATE,
+        output_samples=len(samples),
+        backend_name="piper",
+    )
+    return samples

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Optional
@@ -13,6 +14,7 @@ from faster_whisper import WhisperModel
 
 from app.core.config import settings
 from app.models.schemas import TranscriptionResult
+from app.services.observability import emit_stage_event
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +49,36 @@ def _transcribe(audio: np.ndarray, language: Optional[str]) -> TranscriptionResu
         text=text,
         language=info.language,
         confidence=info.language_probability,
+        language_confidence=info.language_probability,
     )
 
 
 async def transcribe(audio: np.ndarray, language: Optional[str] = None) -> TranscriptionResult:
     """Transcribe *audio* (float32, 16 kHz, mono) to text asynchronously."""
+    start = time.perf_counter()
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_executor, partial(_transcribe, audio, language))
+    try:
+        result = await loop.run_in_executor(_executor, partial(_transcribe, audio, language))
+    except Exception:
+        emit_stage_event(
+            stage="stt",
+            status="failure",
+            latency_ms=(time.perf_counter() - start) * 1000.0,
+            failure_reason="decode_error",
+            language=language,
+        )
+        raise
+
+    failure_reason = "" if result.text.strip() else "no_speech"
+    if failure_reason:
+        result.failure_reason = failure_reason
+
+    emit_stage_event(
+        stage="stt",
+        status="success" if not failure_reason else "dropped",
+        latency_ms=(time.perf_counter() - start) * 1000.0,
+        failure_reason=failure_reason,
+        language=result.language or language,
+        backend_name=result.backend_name,
+    )
+    return result
