@@ -51,8 +51,14 @@ class Settings(BaseSettings):
 
     # ── LLM – Ollama ─────────────────────────────────────────────────────────
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.2:3b"
-    ollama_timeout: float = 30.0
+    # Name Ollama knows the model by (used in every /api/chat request).
+    ollama_model: str = "qwen3.5-35b-a3b:q2-k-xl"
+    ollama_timeout: float = 60.0
+    # Absolute or repo-relative path to the GGUF to register on first boot.
+    # Leave empty to skip auto-registration (e.g. when using a pulled model).
+    ollama_model_gguf_path: str = "models/llm/Qwen3.5-35B-A3B-UD-Q2_K_XL.gguf"
+    # How long (seconds) to wait for Ollama to become reachable on startup.
+    ollama_ready_timeout: float = 120.0
 
 
     # ── Audio pipeline ───────────────────────────────────────────────────────
