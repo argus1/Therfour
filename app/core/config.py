@@ -46,13 +46,14 @@ class Settings(BaseSettings):
     vad_preroll_ms: int = 96
 
     # ── TTS – Piper ──────────────────────────────────────────────────────────
-    piper_model_path: str = "models/en_US-lessac-medium.onnx"
+    piper_model_path: str = "models/piper/en_US-lessac-medium.onnx"
     piper_binary: str = "piper"
 
     # ── LLM – Ollama ─────────────────────────────────────────────────────────
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2:3b"
     ollama_timeout: float = 30.0
+
 
     # ── Audio pipeline ───────────────────────────────────────────────────────
     # Twilio Media Streams deliver μ-law audio at 8 kHz.

@@ -1,0 +1,10 @@
+{
+  "name": "local-model.gguf",
+  "backend": "llm",
+  "target_path": "models/llm/local-model.gguf",
+  "source": {
+    "provider": "google_drive",
+    "file_id": "REPLACE_WITH_DRIVE_FILE_ID"
+  },
+  "notes": "Use this pattern for Drive-backed local LLM packs that you want Git LFS to manage when committed."
+}

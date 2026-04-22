@@ -1,0 +1,13 @@
+{
+  "name": "Qwen3.5-35B-A3B-UD-Q2_K_XL.gguf",
+  "backend": "llm",
+  "target_path": "models/llm/Qwen3.5-35B-A3B-UD-Q2_K_XL.gguf",
+  "source": {
+    "provider": "huggingface",
+    "repo": "unsloth/Qwen3.5-35B-A3B-GGUF",
+    "filename": "Qwen3.5-35B-A3B-UD-Q2_K_XL.gguf"
+  },
+  "approx_size_gb": 11.3,
+  "vram_target": "<=16GB",
+  "notes": "Q2_K_XL (UD imatrix) quantization chosen for local testing on 16 GB unified-memory hardware. Hydrate with: python scripts/fetch_stub.py models/stubs/llm/Qwen3.5-35B-A3B-UD-Q2_K_XL.gguf.stub.json"
+}

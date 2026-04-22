@@ -1,0 +1,10 @@
+{
+  "name": "en_US-lessac-medium.onnx.json",
+  "backend": "piper",
+  "target_path": "models/piper/en_US-lessac-medium.onnx.json",
+  "source": {
+    "provider": "google_drive",
+    "file_id": "REPLACE_WITH_DRIVE_FILE_ID"
+  },
+  "notes": "Replace file_id with the shared Google Drive file id for the Piper voice config JSON."
+}

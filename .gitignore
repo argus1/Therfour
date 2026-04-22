@@ -10,8 +10,11 @@ dist/
 build/
 .coverage
 htmlcov/
-models/
-*.onnx
-*.onnx.json
+models/.downloads/
+models/**/*.partial
+models/**/*.tmp
+# Large model binaries — commit the stub JSON instead, hydrate locally
+models/**/*.gguf
 benchmarks/results/
 third_party/audio_quality_testing_samples/
+
