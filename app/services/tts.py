@@ -16,6 +16,7 @@ from functools import partial
 import numpy as np
 
 from app.core.config import settings
+from app.models.schemas import EmptyOutputError, UnsupportedError
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,9 @@ PIPER_SAMPLE_RATE = 22050
 
 def _synthesize(text: str) -> np.ndarray:
     """Run piper synchronously and return float32 PCM samples."""
+    if not text.strip():
+        raise EmptyOutputError("Cannot synthesize empty text")
+
     cmd = [
         settings.piper_binary,
         "--model", settings.piper_model_path,
@@ -41,13 +45,21 @@ def _synthesize(text: str) -> np.ndarray:
             timeout=30,
         )
     except FileNotFoundError as exc:
-        raise RuntimeError(
+        raise UnsupportedError(
             f"Piper binary not found at '{settings.piper_binary}'. "
             "Install piper and set PIPER_BINARY in .env."
         ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise UnsupportedError(f"Piper synthesis timed out after 30 seconds") from exc
 
     if result.returncode != 0:
-        raise RuntimeError(f"Piper exited with code {result.returncode}: {result.stderr.decode()}")
+        raise UnsupportedError(f"Piper exited with code {result.returncode}: {result.stderr.decode()}")
+
+    if not result.stdout:
+        raise EmptyOutputError("Piper produced no audio output")
+
+    samples = np.frombuffer(result.stdout, dtype=np.int16).astype(np.float32) / 32768.0
+    return samples
 
     samples = np.frombuffer(result.stdout, dtype=np.int16).astype(np.float32) / 32768.0
     return samples

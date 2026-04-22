@@ -13,6 +13,7 @@ from typing import AsyncIterator
 import httpx
 
 from app.core.config import settings
+from app.models.schemas import EmptyOutputError, HTTPError, InvalidResponseError
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +46,25 @@ async def generate(messages: list[dict]) -> str:
         ],
         "stream": False,
     }
-    async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
-        resp = await client.post(
-            f"{settings.ollama_base_url}/api/chat",
-            json=payload,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["message"]["content"]
+    try:
+        async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
+            resp = await client.post(
+                f"{settings.ollama_base_url}/api/chat",
+                json=payload,
+            )
+            if not (200 <= resp.status_code < 300):
+                raise HTTPError(resp.status_code, resp.text)
+
+            data = resp.json()
+            content = data.get("message", {}).get("content", "").strip()
+            if not content:
+                raise EmptyOutputError("LLM returned empty response")
+
+            return content
+    except httpx.RequestError as e:
+        raise InvalidResponseError(f"Failed to communicate with Ollama: {e}") from e
+    except (KeyError, TypeError) as e:
+        raise InvalidResponseError(f"Invalid response format from Ollama: {e}") from e
 
 
 async def generate_stream(messages: list[dict]) -> AsyncIterator[str]:
