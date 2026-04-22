@@ -182,6 +182,149 @@ If only 1 developer is available, execute in the same sequence with reduced para
 - Ensure naming, optionality, and error envelopes are consistent.
 - Add contract-focused tests before implementation changes where feasible.
 
+### Canonical Turn Model (Sprint 1 Contract Baseline)
+
+Purpose: define one cross-runtime contract for a single conversational turn so Python (`app/models/schemas.py`) and Swift (`swift-backend/Sources/swift-backend/VoiceContracts.swift`) can serialize/deserialize without behavioral drift.
+
+#### Shared Payload Structure
+
+Use a two-layer shape for each message exchanged across service boundaries.
+
+- Layer 1: envelope for transport and observability metadata
+- Layer 2: payload for turn semantics (what actually happened in the turn)
+
+Canonical high-level shape:
+
+```json
+{
+  "envelope": {
+    "schema_version": "1.0",
+    "message_type": "turn.request|turn.response|turn.error|turn.event",
+    "trace_id": "uuid",
+    "turn_id": "uuid",
+    "session_id": "uuid",
+    "created_at": "ISO-8601",
+    "source": "telephony|api|swift-backend|worker",
+    "idempotency_key": "string-optional"
+  },
+  "payload": {
+    "input": {
+      "audio": {},
+      "text": {},
+      "dtmf": {},
+      "language": {}
+    },
+    "processing": {
+      "vad": {},
+      "stt": {},
+      "rag": {},
+      "llm": {},
+      "tts": {}
+    },
+    "output": {
+      "assistant_text": "string",
+      "assistant_audio": {},
+      "grounding": {},
+      "safety": {}
+    },
+    "status": {
+      "state": "ok|partial|failed|dropped",
+      "failure_reason": "string-optional",
+      "retryable": false
+    }
+  }
+}
+```
+
+#### Field Naming Rules
+
+Adopt strict `snake_case` for all serialized fields in both Python and Swift wire formats.
+
+- IDs: suffix with `_id` (`turn_id`, `session_id`, `trace_id`)
+- Timestamps: suffix with `_at` for wall time and `_ms` for durations/offsets
+- Booleans: prefix with `is_`, `has_`, or explicit state flags (`fallback_used`)
+- Enums: lowercase string values only (`ok`, `partial`, `failed`, `dropped`)
+- Confidence-like fields: never generic `confidence` when ambiguous
+- Prefer explicit names:
+  - `transcript_confidence`
+  - `language_confidence`
+  - `retrieval_relevance_score`
+
+Cross-runtime mapping rule:
+
+- Swift internal `camelCase` is allowed in code, but encoded JSON keys must remain `snake_case`.
+
+#### Optionality Rules
+
+Define optionality by behavior, not convenience.
+
+- Required always:
+  - `envelope.schema_version`
+  - `envelope.message_type`
+  - `envelope.trace_id`
+  - `envelope.turn_id`
+  - `envelope.session_id`
+  - `envelope.created_at`
+  - `payload.status.state`
+- Required when present by modality:
+  - If audio input exists, require `payload.input.audio.codec` and `payload.input.audio.sample_rate_hz`
+  - If STT executed, require `payload.processing.stt.backend_name` and transcript text or explicit `failure_reason`
+  - If TTS executed, require `payload.processing.tts.voice_id` and output format
+- Optional but recommended:
+  - `idempotency_key`, `backend_name`, `fallback_used`, `transcript_quality_score`, `vad_voiced_duration_ms`
+- Prohibited:
+  - Null for required fields
+  - Empty string sentinel values for missing data
+  - Mixed-type fields across turns (for example score as string in one turn and number in another)
+
+Missing optional fields should be omitted, not emitted as null, unless a consumer explicitly requires nullable semantics.
+
+#### Envelope Rules
+
+Envelope is transport-safe and stable across message types.
+
+- `schema_version` is mandatory and semantic (`major.minor`)
+- `message_type` controls payload validation profile:
+  - `turn.request`: caller input + pre-processing metadata
+  - `turn.response`: assistant output + synthesis metadata
+  - `turn.error`: normalized failure envelope
+  - `turn.event`: intermediate state/progress events
+- `trace_id` is stable across all turns in one call/session chain when possible
+- `turn_id` is unique per turn attempt
+- Retries keep `turn_id` only if idempotent replay semantics are guaranteed; otherwise create a new `turn_id` and include `parent_turn_id` in payload
+- Every `turn.error` must include:
+  - `payload.status.state = failed`
+  - `payload.status.failure_reason`
+  - `payload.status.retryable`
+  - error classification (`timeout|validation|provider|internal|upstream_cancel`)
+
+#### Error and Partial-Turn Normalization
+
+Avoid ad hoc error shapes.
+
+- A dropped no-speech turn should be `state = dropped`, not `failed`
+- Partial pipeline success (for example STT success, TTS failure) should be `state = partial`
+- Failures from providers should preserve raw details in a debug-only subfield, with sanitized top-level reason for stable contract behavior
+
+#### Action Point Stubs (Implementation Checklist)
+
+<!-- for agents: coordination-only stubs live here. Keep edits in this section scoped to ownership notes and checklist state updates. -->
+<!-- for agents: Nicole owns app/models/schemas.py in current branch window. Avoid direct edits there from parallel branches unless explicitly reassigned. -->
+<!-- for agents: Prefer additive updates in this document and JSON examples to minimize cross-file contention during schema implementation. -->
+
+- [ ] Define `CanonicalTurnEnvelope` and `CanonicalTurnPayload` models in `app/models/schemas.py`
+- [ ] Define matching Codable structs in `swift-backend/Sources/swift-backend/VoiceContracts.swift`
+- [ ] Add versioned JSON schema example files in `Documentation/alignment_plan/deliverables/` (`turn.request.v1.json`, `turn.response.v1.json`, `turn.error.v1.json`)
+- [ ] Add Python contract tests for required/optional field validation in `tests/test_api.py` and `tests/test_telephony.py`
+- [ ] Add Swift decoding/encoding parity tests in `swift-backend/Tests/swift-backendTests/`
+- [ ] Add migration notes mapping current TherFour fields to canonical names
+- [ ] Add `schema_version` compatibility policy (minor backward-compatible, major breaking)
+- [ ] Add observability mapping for `trace_id`, `turn_id`, status, and component latency fields
+
+<!-- for agents: action stub A - If touching app/models/schemas.py becomes necessary, claim ownership in PR/task thread before code edits. -->
+<!-- for agents: action stub B - Prefer implementing turn.request/turn.response/turn.error JSON examples first; wire schemas second. -->
+<!-- for agents: action stub C - Keep field names snake_case on wire; Swift camelCase mapping only in code-level property names. -->
+
 #### Day 5: Prompt + RAG Strategy Lock
 
 - Align prompt templates with HCA conventions (role boundaries, system constraints, safety rails).
