@@ -163,7 +163,7 @@ async def test_run_turn_drops_no_speech_without_calling_llm(monkeypatch) -> None
     session = CallSession(_DummyWebSocket())
     audio = np.zeros(6000, dtype=np.float32)
 
-    async def _fake_transcribe(_audio):
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
         return TranscriptionResult(
             text="",
             language="en",
@@ -195,3 +195,56 @@ async def test_run_turn_drops_no_speech_without_calling_llm(monkeypatch) -> None
 
     assert captured_reasons == ["no_speech"]
     assert session._conversation == []
+
+
+@pytest.mark.asyncio
+async def test_run_turn_sticks_to_sherpa_after_first_sherpa_result(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+    preferred_backends: list[str | None] = []
+
+    responses = [
+        TranscriptionResult(
+            text="hello",
+            language="en",
+            confidence=0.9,
+            language_confidence=0.0,
+            transcript_quality_score=0.9,
+            backend_name="sherpa-onnx",
+            fallback_used=True,
+            failure_reason="",
+        ),
+        TranscriptionResult(
+            text="again",
+            language="en",
+            confidence=0.9,
+            language_confidence=0.0,
+            transcript_quality_score=0.9,
+            backend_name="sherpa-onnx",
+            fallback_used=True,
+            failure_reason="",
+        ),
+    ]
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        preferred_backends.append(preferred_backend)
+        return responses.pop(0)
+
+    async def _fake_generate(_conversation):
+        return "ok"
+
+    async def _fake_synthesize(_text):
+        return np.zeros(22050, dtype=np.float32)
+
+    async def _fake_send_audio(_samples):
+        return None
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.llm.generate", _fake_generate)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+
+    await session._run_turn(audio)
+    await session._run_turn(audio)
+
+    assert preferred_backends == [None, "sherpa"]

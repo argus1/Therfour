@@ -25,7 +25,7 @@ async def test_transcribe_returns_transcription_result() -> None:
     mock_model = MagicMock()
     mock_model.transcribe.return_value = ([mock_seg], mock_info)
 
-    with patch("app.services.stt._load_model", return_value=mock_model):
+    with patch.object(stt_service._WhisperBackend, "_load", return_value=mock_model):
         result = await stt_service.transcribe(audio)
 
     assert isinstance(result, TranscriptionResult)
@@ -49,7 +49,7 @@ async def test_transcribe_empty_segments_gives_empty_string() -> None:
     mock_model = MagicMock()
     mock_model.transcribe.return_value = ([], mock_info)
 
-    with patch("app.services.stt._load_model", return_value=mock_model):
+    with patch.object(stt_service._WhisperBackend, "_load", return_value=mock_model):
         result = await stt_service.transcribe(audio)
 
     assert result.text == ""
@@ -73,7 +73,7 @@ async def test_transcribe_uses_fallback_attempt_after_empty_primary() -> None:
     mock_model = MagicMock()
     mock_model.transcribe.side_effect = [([], primary_info), ([fallback_seg], fallback_info)]
 
-    with patch("app.services.stt._load_model", return_value=mock_model), patch.object(
+    with patch.object(stt_service._WhisperBackend, "_load", return_value=mock_model), patch.object(
         stt_service.settings, "whisper_fallback_enabled", True
     ):
         result = await stt_service.transcribe(audio, language="en")
@@ -96,7 +96,7 @@ async def test_transcribe_rejects_low_quality_text() -> None:
     mock_model = MagicMock()
     mock_model.transcribe.return_value = ([low_quality_seg], mock_info)
 
-    with patch("app.services.stt._load_model", return_value=mock_model), patch.object(
+    with patch.object(stt_service._WhisperBackend, "_load", return_value=mock_model), patch.object(
         stt_service.settings, "whisper_fallback_enabled", False
     ):
         result = await stt_service.transcribe(audio)
@@ -118,7 +118,7 @@ async def test_transcribe_uses_single_attempt_when_fallback_disabled() -> None:
     mock_model = MagicMock()
     mock_model.transcribe.return_value = ([mock_seg], mock_info)
 
-    with patch("app.services.stt._load_model", return_value=mock_model), patch.object(
+    with patch.object(stt_service._WhisperBackend, "_load", return_value=mock_model), patch.object(
         stt_service.settings, "whisper_fallback_enabled", False
     ):
         result = await stt_service.transcribe(audio, language="en")
@@ -141,7 +141,7 @@ async def test_transcribe_fallback_attempt_uses_auto_language_after_primary_fail
     mock_model = MagicMock()
     mock_model.transcribe.side_effect = [RuntimeError("primary failed"), ([fallback_seg], fallback_info)]
 
-    with patch("app.services.stt._load_model", return_value=mock_model), patch.object(
+    with patch.object(stt_service._WhisperBackend, "_load", return_value=mock_model), patch.object(
         stt_service.settings, "whisper_fallback_enabled", True
     ):
         result = await stt_service.transcribe(audio, language="en")
@@ -159,8 +159,57 @@ async def test_transcribe_raises_when_all_attempts_fail() -> None:
     mock_model = MagicMock()
     mock_model.transcribe.side_effect = RuntimeError("all attempts failed")
 
-    with patch("app.services.stt._load_model", return_value=mock_model), patch.object(
+    with patch.object(stt_service._WhisperBackend, "_load", return_value=mock_model), patch.object(
         stt_service.settings, "whisper_fallback_enabled", True
     ):
         with pytest.raises(RuntimeError, match="all attempts failed"):
             await stt_service.transcribe(audio, language="en")
+
+
+@pytest.mark.asyncio
+async def test_transcribe_falls_back_to_sherpa_when_whisper_raises() -> None:
+    audio = np.zeros(16000, dtype=np.float32)
+    sherpa_result = TranscriptionResult(
+        text="from sherpa",
+        language="en",
+        confidence=0.8,
+        language_confidence=0.0,
+        transcript_quality_score=0.8,
+        backend_name="sherpa-onnx",
+        fallback_used=True,
+        failure_reason="",
+    )
+
+    whisper_backend = MagicMock()
+    whisper_backend.transcribe.side_effect = RuntimeError("whisper hard failure")
+    sherpa_backend = MagicMock()
+    sherpa_backend.transcribe.return_value = sherpa_result
+
+    with patch.object(stt_service, "_get_whisper_backend", return_value=whisper_backend), patch.object(
+        stt_service, "_get_sherpa_backend", return_value=sherpa_backend
+    ), patch.object(stt_service.settings, "stt_sherpa_fallback_enabled", True):
+        result = await stt_service.transcribe(audio, language="en")
+
+    assert result == sherpa_result
+    whisper_backend.transcribe.assert_called_once()
+    sherpa_backend.transcribe.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_transcribe_raises_original_whisper_error_when_sherpa_fallback_fails() -> None:
+    audio = np.zeros(16000, dtype=np.float32)
+    whisper_error = RuntimeError("whisper hard failure")
+
+    whisper_backend = MagicMock()
+    whisper_backend.transcribe.side_effect = whisper_error
+    sherpa_backend = MagicMock()
+    sherpa_backend.transcribe.side_effect = RuntimeError("sherpa unavailable")
+
+    with patch.object(stt_service, "_get_whisper_backend", return_value=whisper_backend), patch.object(
+        stt_service, "_get_sherpa_backend", return_value=sherpa_backend
+    ), patch.object(stt_service.settings, "stt_sherpa_fallback_enabled", True):
+        with pytest.raises(RuntimeError, match="whisper hard failure"):
+            await stt_service.transcribe(audio, language="en")
+
+    whisper_backend.transcribe.assert_called_once()
+    sherpa_backend.transcribe.assert_called_once()

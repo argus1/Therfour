@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,6 +37,16 @@ class Settings(BaseSettings):
     whisper_fallback_beam_size: int = 1
     stt_min_text_characters: int = 2
     stt_min_quality_score: float = 0.25
+    # "whisper" is the primary backend; set to "sherpa" to use Sherpa-ONNX directly.
+    stt_primary_backend: Literal["whisper", "sherpa"] = "whisper"
+    # Fall back to Sherpa-ONNX when all Whisper decode attempts are exhausted.
+    stt_sherpa_fallback_enabled: bool = True
+    # Directory that contains encoder.int8.onnx and decoder.int8.onnx for Sherpa.
+    sherpa_model_dir: str = "models/sherpa"
+    # Path to the tokens.txt file for the Sherpa model.
+    sherpa_tokens_path: str = "models/sherpa/tokens.txt"
+    # Number of CPU threads used by the Sherpa-ONNX recognizer.
+    sherpa_num_threads: int = 1
 
     # ── VAD – Silero ─────────────────────────────────────────────────────────
     vad_enabled: bool = True

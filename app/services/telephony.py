@@ -84,6 +84,7 @@ class CallSession:
         self._processing = False
         self._loop = asyncio.get_event_loop()
         self._speech_detector: Optional[StreamingSpeechDetector] = None
+        self._stt_backend_sticky: Optional[stt.STTBackendName] = None
 
         if settings.vad_enabled:
             if silero_vad_available():
@@ -199,7 +200,12 @@ class CallSession:
             self._log_turn_drop("too_short", audio=audio)
             return
 
-        result = await stt.transcribe(audio)
+        result = await stt.transcribe(audio, preferred_backend=self._stt_backend_sticky)
+
+        if result.backend_name == "sherpa-onnx" and self._stt_backend_sticky != "sherpa":
+            self._stt_backend_sticky = "sherpa"
+            logger.info("STT backend switched to session-sticky Sherpa-ONNX")
+
         text = result.text.strip()
         if not text:
             self._log_turn_drop(result.failure_reason or "no_speech", audio=audio, result=result)
