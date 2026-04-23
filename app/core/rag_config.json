@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "strategy": "standard",
+  "retrieval": {
+    "top_k": 5,
+    "top_k_final": 3,
+    "similarity_threshold": 0.35,
+    "min_query_chars": 3
+  },
+  "standard": {
+    "chroma_path": "data/chroma/default",
+    "collection_name": "therfour_docs"
+  },
+  "hierarchical": {
+    "fallback_to_standard_on_miss": true,
+    "categorizer": {
+      "method": "keyword",
+      "default_category": "general",
+      "llm": {
+        "model": "qwen3.5-35b-a3b:q2-k-xl",
+        "timeout_s": 10,
+        "strict": true
+      },
+      "categories": [
+        {
+          "name": "overdose",
+          "keywords": ["overdose", "od", "naloxone", "respiratory depression"],
+          "chroma_path": "data/chroma/overdose",
+          "collection_name": "overdose_docs"
+        },
+        {
+          "name": "stimulants",
+          "keywords": ["meth", "cocaine", "stimulant", "crash"],
+          "chroma_path": "data/chroma/stimulants",
+          "collection_name": "stimulant_docs"
+        },
+        {
+          "name": "opioids",
+          "keywords": ["opioid", "fentanyl", "heroin", "withdrawal"],
+          "chroma_path": "data/chroma/opioids",
+          "collection_name": "opioid_docs"
+        },
+        {
+          "name": "general",
+          "keywords": [],
+          "chroma_path": "data/chroma/general",
+          "collection_name": "general_docs"
+        }
+      ]
+    }
+  },
+  "prompt": {
+    "include_scores": true,
+    "include_sources": true,
+    "section_title": "Retrieved context"
+  },
+  "observability": {
+    "log_selected_category": true,
+    "log_candidate_count": true,
+    "log_filtered_count": true,
+    "log_retrieval_latency_ms": true
+  }
+}

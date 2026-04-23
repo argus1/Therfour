@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     # How long (seconds) to wait for Ollama to become reachable on startup.
     ollama_ready_timeout: float = 120.0
 
+    # ── RAG ─────────────────────────────────────────────────────────────────
+    rag_enabled: bool = False
+    rag_config_path: str = "app/core/rag_config.json"
+
 
     # ── Audio pipeline ───────────────────────────────────────────────────────
     # Twilio Media Streams deliver μ-law audio at 8 kHz.

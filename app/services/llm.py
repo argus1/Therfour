@@ -6,6 +6,7 @@ no data is sent to external servers.  See https://ollama.com for setup.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import AsyncIterator
@@ -13,6 +14,7 @@ from typing import AsyncIterator
 import httpx
 
 from app.core.config import settings
+from app.services import rag
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +36,22 @@ HARM_REDUCTION_SYSTEM_PROMPT = (
     "- You are multilingual; always respond in the language the caller uses."
 )
 
+RAG_GROUNDING_RULES = (
+    "\n\nRAG grounding policy:\n"
+    "- Use retrieved context only when it is directly relevant to the caller question.\n"
+    "- Ignore off-topic or duplicate retrieved snippets.\n"
+    "- If context is missing or insufficient, answer briefly without mentioning retrieval internals.\n"
+    "- Do not expose source labels, scores, or retrieval scaffolding in final caller responses."
+)
+
 
 async def generate(messages: list[dict]) -> str:
     """Send *messages* to Ollama and return the assistant reply as a string."""
+    system_prompt = await _build_system_prompt(messages)
     payload = {
         "model": settings.ollama_model,
         "messages": [
-            {"role": "system", "content": HARM_REDUCTION_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             *messages,
         ],
         "stream": False,
@@ -57,10 +68,11 @@ async def generate(messages: list[dict]) -> str:
 
 async def generate_stream(messages: list[dict]) -> AsyncIterator[str]:
     """Stream response tokens from Ollama one chunk at a time."""
+    system_prompt = await _build_system_prompt(messages)
     payload = {
         "model": settings.ollama_model,
         "messages": [
-            {"role": "system", "content": HARM_REDUCTION_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             *messages,
         ],
         "stream": True,
@@ -80,3 +92,27 @@ async def generate_stream(messages: list[dict]) -> AsyncIterator[str]:
                     yield token
                 if data.get("done"):
                     break
+
+
+async def _build_system_prompt(messages: list[dict]) -> str:
+    prompt = HARM_REDUCTION_SYSTEM_PROMPT
+    if not settings.rag_enabled:
+        return prompt
+
+    prompt = f"{prompt}{RAG_GROUNDING_RULES}"
+    query = _latest_user_message(messages)
+    if not query:
+        return prompt
+
+    result = await asyncio.to_thread(rag.retrieve, query)
+    context_block = rag.build_context_block(result.contexts)
+    if not context_block:
+        return prompt
+    return f"{prompt}\n\n{context_block}"
+
+
+def _latest_user_message(messages: list[dict]) -> str:
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            return str(message.get("content", "")).strip()
+    return ""
