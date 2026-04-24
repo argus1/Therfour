@@ -1,18 +1,22 @@
 # RAG Options Configuration Guide
 
 This project supports two RAG strategies selected by configuration:
+
 - `standard`: query a single Chroma database.
 - `hierarchical`: run a categorization pass, then query a category-specific Chroma database from a partitioned corpus.
 
 Inside `hierarchical`, categorization now supports three modes:
+
 - `keyword`: keyword-only category routing.
 - `llm`: LLM-only category routing.
 - `keyword_then_llm`: keyword first, then LLM fallback if keyword matching has no hits.
 
 The runtime config file is:
+
 - `app/core/rag_config.json`
 
 The app-level enable/switch env fields are in:
+
 - `app/core/config.py`
 
 ## 1) Enable RAG Runtime
@@ -105,12 +109,14 @@ If `RAG_ENABLED=false`, the app stays prompt-only (current baseline behavior).
 Each category should map to a corpus partition with consistent topical boundaries.
 
 Required fields per category:
+
 - `name`
 - `keywords` (for keyword categorizer)
 - `chroma_path`
 - `collection_name`
 
 Recommended partitions for this domain:
+
 - `overdose`
 - `opioids`
 - `stimulants`
@@ -124,6 +130,7 @@ Recommended partitions for this domain:
 - `min_query_chars`: skip retrieval for too-short queries.
 
 Initial defaults (aligned with lock guidance):
+
 - `top_k=5`
 - `top_k_final=3`
 - `similarity_threshold=0.35`
@@ -132,14 +139,44 @@ Initial defaults (aligned with lock guidance):
 
 Retrieved chunks are packed as indexed blocks and can include source and score metadata. This is controlled by `prompt.include_sources` and `prompt.include_scores`.
 
-Grounding behavior should remain:
-- use retrieved context only when relevant,
-- ignore off-topic/duplicate snippets,
-- do not expose retrieval scaffolding to callers.
+### Packing Rules (locked)
+
+- Chunks are sorted descending by `score` before packing.
+- Near-duplicate chunks (cosine > `dedup_cosine_threshold`, default 0.92 after score-ordering) are dropped — only the highest-scored copy is retained.
+- The packed context section must not exceed `context_section_token_budget` (default 600 tokens). If the last chunk would push past the budget, truncate it at a sentence boundary or drop it.
+- Only `top_k_final` chunks (default 3) survive threshold filtering and are packed.
+- The context section is omitted entirely when zero chunks survive the inclusion gate — the LLM receives no context block.
+
+### Context Window Usage
+
+A fixed per-turn token budget applies across all regions (see lock document §8):
+
+| Region                         | Budget (tokens) |
+| ------------------------------ | --------------: |
+| System prompt base             |             400 |
+| RAG context section            |             600 |
+| Conversation history (rolling) |            1500 |
+| Current utterance              |             512 |
+| Generation headroom            |            1084 |
+| **Total**                      |        **4096** |
+
+Conversation history is trimmed (oldest pairs first) when it would exceed `conversation_history_token_cap` (default 1500).
+
+### Grounding Behavior (locked)
+
+- Use retrieved context only when it is directly relevant to the caller question.
+- Ignore off-topic or duplicate retrieved snippets.
+- If context is missing or insufficient, answer briefly without mentioning retrieval internals.
+- Do not expose source labels, scores, or retrieval scaffolding (`[1 | source: … | score: …]`) in final caller responses.
+- Lead with the answer, not with narration about retrieval.
+- A response sanitizer (AP-06) must strip scaffold leakage before audio synthesis.
+
+Full lock rationale and acceptance criteria are in `Documentation/alignment_plan/deliverables/RAG_lock.md` §§7–9.
 
 ## 7) Operational Gaps the Config Now Covers
 
 The new config fills key gaps that were previously implicit or missing:
+
 - Explicit strategy switch (`standard` vs `hierarchical`).
 - Partition routing map from category to Chroma path and collection.
 - Categorizer configuration and fallback behavior.
@@ -178,3 +215,47 @@ RAG_ENABLED=true
 - Each configured Chroma path exists and has the collection named in config.
 - Logs show selected strategy/category and retrieval counts.
 - Responses do not leak context scaffolding to callers.
+
+## 10) Multi-Pass Behavior and Hierarchical Latency Contracts
+
+When `strategy = "hierarchical"`, retrieval runs in up to three sequential passes. Each pass has a locked behavior and latency target.
+
+### Pass 1: Category Routing
+
+| Categorizer method | Expected latency                             | Fallback behavior on failure     |
+| ------------------ | -------------------------------------------- | -------------------------------- |
+| `keyword`          | < 2 ms                                       | none — deterministic             |
+| `llm`              | < 10 s (hard cap)                            | timeout → `default_category`     |
+| `keyword_then_llm` | < 2 ms if keyword hits; < 10 s if LLM needed | LLM timeout → `default_category` |
+
+- **Locked default method for ≥ 4 categories:** `keyword_then_llm`
+- **Locked default method for ≤ 3 categories:** `keyword`
+- The LLM categorizer uses a compact routing prompt (< 200 tokens). Full conversation history is never included.
+- `strict: true` is required — unrecognized LLM output falls back to `default_category` silently.
+
+### Pass 2: Category-Scoped Retrieval
+
+- Executes standard vector search against the routed partition.
+- Applies `top_k`, `similarity_threshold`, `top_k_final` as configured.
+- Target latency: < 300 ms. Alert threshold: > 800 ms.
+
+### Pass 3: Standard Fallback (Conditional)
+
+- Runs only when Pass 2 filtered set is empty AND `fallback_to_standard_on_miss: true`.
+- Logs `selected_category` as `<original_category>->standard`.
+- Same query, same threshold, same budget — no special treatment in prompt assembly.
+- Target additional latency: < 300 ms.
+
+### Total Pre-Generation Overhead Targets
+
+| Routing method | Target total |
+| -------------- | ------------ |
+| Keyword only   | < 500 ms     |
+| LLM-routed     | < 4 s        |
+
+### Hierarchical DB Provisioning Rules
+
+- All category partitions must pass the validation checklist before enabling `strategy: hierarchical`.
+- Adding a new category requires: corpus ingested + `rag_config.json` updated + process restart.
+- `rag_config.json` is cached via `lru_cache`; file edits are not hot-reloaded — restart required.
+- See lock document §10 for full provisioning rules.

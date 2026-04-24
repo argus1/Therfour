@@ -1,7 +1,7 @@
 # RAG Strategy Lock (Sprint 1)
 
-Date: 2026-04-21  
-Scope: Query construction, retrieval defaults, and grounding behavior for TherFour parity work.
+Date: 2026-04-21 (revised 2026-04-23)
+Scope: Query construction, retrieval defaults, context packing rules, context window budget, grounded response format, and multi-pass hierarchical structure for TherFour parity work.
 
 ## Decision Summary
 
@@ -48,15 +48,154 @@ Scope: Query construction, retrieval defaults, and grounding behavior for TherFo
 - Defer: WAX conversion as optional export/offline artifact, not runtime dependency.
 - Rationale: Lowest complexity path for parity delivery and retrieval tuning.
 
+### 7) Context Packing Rules (Locked)
+
+These rules govern how retrieved chunks are assembled into the prompt section before generation.
+
+**Pack order**
+
+- Sort filtered contexts descending by `score`.
+- Never reorder by insertion index or source — score order is canonical.
+
+**Token budget**
+
+- The total context section (all packed chunks combined, including headers) must not exceed `context_section_token_budget` tokens.
+- Default lock: **600 tokens** for the context section. This reserves ≥ 1 k tokens for the system prompt base and ≥ 2 k tokens for conversation history + generation headroom in a 4 k effective window.
+- Per-chunk ingest target: **200 tokens per chunk** (`context_per_chunk_token_target`). Chunks above 300 tokens at ingest time should be re-split.
+
+**Inclusion gate**
+
+- Include a context only when all of these hold:
+  1. `score >= similarity_threshold` (default 0.35)
+  2. Chunk is not a near-duplicate of a higher-ranked chunk already packed (cosine > 0.92 after score-ordering is a dedup signal; discard lower-ranked duplicate)
+  3. Budget headroom remains before appending this chunk
+
+**Format**
+
+- Each packed context block renders as:
+  ```
+  [<index> | source: <source> | score: <score>]
+  <chunk text>
+  ```
+- Indexes are 1-based and stable within the assembled block.
+- Do not emit empty blocks — omit the entire context section when zero chunks survive the inclusion gate.
+
+**What is not packed**
+
+- Retrieval metadata beyond `source` and `score` (e.g. `chunk_id`, `embedding_model`) must not appear in the prompt context section; those fields are observability-only.
+- Full conversation history is never re-embedded and never injected into the context block (history lives in the `messages` list, not the system prompt).
+
+### 8) Context Window Usage Budget (Locked)
+
+Effective context window budget for a Qwen3.5-35B-A3B at q2_k_xl quantization, targeting **4 096 token effective window** (conservative; actual model max is larger but telephony latency penalizes long contexts).
+
+| Region                       | Token budget | Notes                                            |
+| ---------------------------- | -----------: | ------------------------------------------------ |
+| System prompt base           |          400 | `HARM_REDUCTION_SYSTEM_PROMPT` + grounding rules |
+| RAG context section          |          600 | Max packed chunks (§7 above)                     |
+| Conversation history (turns) |         1500 | Rolling window; trim oldest if over budget       |
+| Current user utterance       |          512 | `query_max_tokens` cap from query builder        |
+| Generation headroom (output) |         1084 | Remaining space for response tokens              |
+| **Total**                    |    **4 096** |                                                  |
+
+Rules:
+
+- If conversation history would push total input over 4 096 − 1 084 = 3 012 tokens, trim the oldest user+assistant turn pairs until it fits.
+- If RAG context section exceeds 600 tokens after packing, truncate the lowest-scored chunk partially (at sentence boundary) or drop it to respect the budget.
+- These budgets are expressed as config fields so they can be tuned without code changes (see §Locked Defaults table).
+
+### 9) Grounded Response Format (Locked)
+
+These rules govern the shape of the assistant response when retrieved context is present.
+
+**Required behaviors**
+
+- State conclusions derived from retrieved context in plain language; do not restate chunk text verbatim unless the caller explicitly requests a quote.
+- When context directly answers the query, lead with the answer, not with a preamble about what was retrieved.
+- When context partially answers the query, answer what is covered and say briefly what is not covered — do not fabricate to fill gaps.
+- When context is present but off-topic, ignore it silently; respond from general harm-reduction knowledge without mentioning retrieval.
+
+**Prohibited in caller-facing output**
+
+- Source labels (`source: ...`), retrieval scores, `chunk_id`, index numbers from the context block.
+- Process narration: phrases like "Based on the retrieved context…", "According to document X…", "The search returned…".
+- Internal planning text, prompt echoes, or tool-call transcripts.
+- Uncertainty preambles unless genuinely warranted (e.g. "I think maybe…" when answer is retrievable).
+
+**Sanitization gate (AP-06)**
+
+- A response sanitizer must be applied before audio synthesis.
+- Sanitizer checks for scaffold leakage patterns from the prohibited list above and removes them from the response string.
+- Sanitizer should preserve natural sentence boundaries; do not truncate mid-sentence.
+
+**Telephony style constraints (carry-forward)**
+
+- Keep responses to 2–3 sentences for most turns. Safety-critical information (overdose, emergency escalation) may extend to 4 sentences.
+- Respond in the caller's language — this applies equally when retrieval context is present.
+
+### 10) Multi-Pass Retrieval and Hierarchical Vector DB Structure (Locked)
+
+This section locks behavior for the `hierarchical` strategy and multi-pass execution path described in `RAG_options.md`.
+
+#### Pass 1: Category Routing
+
+- **Purpose:** Map the normalized query to a corpus partition before retrieval.
+- **Method progression:** `keyword` → `keyword_then_llm` → `llm` (from least to most expensive; select based on corpus complexity and latency budget).
+- **Default lock for Sprint 1:** `keyword_then_llm` for any corpus with ≥ 4 defined categories; `keyword` when ≤ 3 categories.
+- **LLM categorizer constraints:**
+  - Model: `qwen3.5-35b-a3b:q2-k-xl` (same runtime model as generation — no additional model deployment required).
+  - Timeout: 10 s hard cap (`llm.timeout_s`). On timeout, fall back to `default_category` immediately.
+  - `strict: true` is required in production — unrecognized model output must default to `default_category`, not raise.
+  - Categorizer token budget: keep the routing prompt under 200 tokens (query + category list). Do not embed full conversation history.
+- **Category boundary rules:**
+  - Each category partition must map to a single topically-bounded corpus; no cross-partition document overlap.
+  - Locked corpus partitions for this domain: `overdose`, `opioids`, `stimulants`, `general`.
+  - `general` is the mandatory catch-all; it must always be present in the config.
+
+#### Pass 2: Category-Scoped Retrieval
+
+- Execute vector search against the category-specific `chroma_path` + `collection_name`.
+- Apply standard retrieval parameters (`top_k`, `similarity_threshold`, `top_k_final`) as defined in §3.
+- If the category-scoped query returns zero results and `fallback_to_standard_on_miss=true`, execute a second query against the standard (`general`) collection.
+- Log the fallback event (`selected_category` will show as `<original_category>->standard` in observability).
+
+#### Pass 3: Standard Fallback (Conditional)
+
+- Runs only when Pass 2 returns an empty filtered set and `fallback_to_standard_on_miss=true`.
+- Use the same normalized query; do not re-normalize.
+- Apply the same threshold and budget filters.
+- The context block assembled from fallback results is treated identically to a direct hit — no special annotation in the prompt.
+
+#### Multi-Pass Latency Contract
+
+- Pass 1 (keyword): < 2 ms (in-process).
+- Pass 1 (LLM categorizer): < 10 s hard cap, target < 3 s.
+- Pass 2 (vector search): target < 300 ms; alert threshold > 800 ms.
+- Pass 3 (fallback search, if triggered): target < 300 ms additional.
+- Total pre-generation overhead target: **< 500 ms** for keyword routing; **< 4 s** for LLM-routed turns.
+
+#### Hierarchical DB Maintenance Rules
+
+- Each partition's `chroma_path` must be provisioned and validated before enabling `strategy: hierarchical`.
+- Validation checklist (per partition): path exists, collection named in config is present, at least one document indexed, sample query returns a result.
+- Adding a new category requires: corpus ingested + `rag_config.json` category entry + restart — no dynamic registration at runtime.
+- `rag_config.json` changes require a process restart (config is cached via `lru_cache`; cache is not invalidated on file change).
+
 ## Locked Defaults (Configurable)
 
-| Setting                          | Locked Default | Notes                                  |
-| -------------------------------- | -------------: | -------------------------------------- |
-| `retrieval_top_k`                |              5 | Candidate pool before threshold filter |
-| `top_k_final`                    |              3 | Max contexts packed into prompt        |
-| `similarity_threshold`           |           0.35 | Cosine floor for inclusion             |
-| `query_max_tokens`               |            512 | Pre-embedding guardrail                |
-| `context_per_chunk_token_target` |            200 | Ingest/packing target                  |
+| Setting                          |     Locked Default | Notes                                                     |
+| -------------------------------- | -----------------: | --------------------------------------------------------- |
+| `retrieval_top_k`                |                  5 | Candidate pool before threshold filter                    |
+| `top_k_final`                    |                  3 | Max contexts packed into prompt                           |
+| `similarity_threshold`           |               0.35 | Cosine floor for inclusion                                |
+| `query_max_tokens`               |                512 | Pre-embedding guardrail                                   |
+| `context_per_chunk_token_target` |                200 | Ingest/packing target per chunk                           |
+| `context_section_token_budget`   |                600 | Max total tokens for packed RAG context in prompt         |
+| `conversation_history_token_cap` |               1500 | Rolling history window before oldest-turn trimming        |
+| `effective_context_window`       |               4096 | Total input window assumed for budget math                |
+| `dedup_cosine_threshold`         |               0.92 | Cosine above which a lower-ranked chunk is treated as dup |
+| `categorizer_method`             | `keyword_then_llm` | For corpora with ≥ 4 categories; `keyword` for ≤ 3        |
+| `categorizer_llm_timeout_s`      |                 10 | Hard timeout for LLM categorizer; falls back to default   |
 
 ## Required Data Contract (Chunk/Context Metadata)
 
@@ -177,3 +316,12 @@ Scope: Query construction, retrieval defaults, and grounding behavior for TherFo
 - Grounding behavior validated on mixed relevant/off-topic contexts.
 - Empty and low-relevance retrieval behaviors are deterministic.
 - No retrieval scaffold leaks in final caller response.
+- Context section total tokens stay within `context_section_token_budget` (default 600).
+- Conversation history trimming activates when history exceeds `conversation_history_token_cap`.
+- Near-duplicate chunks are deduplicated before packing (cosine gate).
+- Sanitizer strips source labels, scores, and process narration before TTS synthesis.
+- Hierarchical: Pass 1 keyword routing resolves in < 2 ms; LLM categorizer respects 10 s timeout with default-category fallback.
+- Hierarchical: Pass 2 fallback to standard collection is logged with `<category>->standard` marker.
+- Hierarchical: All category partitions validated (path exists, collection present, sample query returns result) before enabling `strategy: hierarchical`.
+- Multi-pass latency stays within pre-generation overhead targets (< 500 ms keyword; < 4 s LLM-routed).
+- `rag_config.json` changes require restart (cached config behavior documented and tested).

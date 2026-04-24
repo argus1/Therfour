@@ -5,7 +5,13 @@
     "top_k": 5,
     "top_k_final": 3,
     "similarity_threshold": 0.35,
-    "min_query_chars": 3
+    "min_query_chars": 3,
+    "query_max_tokens": 512,
+    "context_per_chunk_token_target": 200,
+    "context_section_token_budget": 600,
+    "conversation_history_token_cap": 1500,
+    "effective_context_window": 4096,
+    "dedup_cosine_threshold": 0.92
   },
   "standard": {
     "chroma_path": "data/chroma/default",
