@@ -40,14 +40,14 @@ Note: the plan defines "agreed threshold" wording but does not currently record 
 
 The benchmark JSON files record `text_chars` per result. A result with `text_chars = 0` indicates the VAD filter suppressed all speech and Whisper returned an empty transcript — the functional equivalent of a dropped call in production.
 
-| Run | Model | Total files | Empty transcript | Empty rate | SNR condition |
-| --- | --- | ---: | ---: | ---: | --- |
-| 20260419T072617Z | small | 28 | 4 | 14.3% | all at −10 dB noise |
-| 20260419T072736Z | small | 160 | 21 | 13.1% | all at −10 dB noise |
-| 20260419T072736Z | distil-large-v3 | 160 | 8 | 5.0% | all at −10 dB noise |
-| 20260419T074919Z | small | 16 | 2 | 12.5% | all at −10 dB noise |
-| 20260419T083650Z | small | 160 | 21 | 13.1% | all at −10 dB noise |
-| 20260419T083650Z | distil-large-v3 | 160 | 8 | 5.0% | all at −10 dB noise |
+| Run              | Model           | Total files | Empty transcript | Empty rate | SNR condition       |
+| ---------------- | --------------- | ----------: | ---------------: | ---------: | ------------------- |
+| 20260419T072617Z | small           |          28 |                4 |      14.3% | all at −10 dB noise |
+| 20260419T072736Z | small           |         160 |               21 |      13.1% | all at −10 dB noise |
+| 20260419T072736Z | distil-large-v3 |         160 |                8 |       5.0% | all at −10 dB noise |
+| 20260419T074919Z | small           |          16 |                2 |      12.5% | all at −10 dB noise |
+| 20260419T083650Z | small           |         160 |               21 |      13.1% | all at −10 dB noise |
+| 20260419T083650Z | distil-large-v3 |         160 |                8 |       5.0% | all at −10 dB noise |
 
 **Key finding:** every empty-transcript result in the reference run (`20260419T083650Z`) occurs exclusively at SNR = −10 dB (extreme noise). No failures were observed under clean or moderate-noise conditions. This is expected VAD behaviour, not an inference error.
 

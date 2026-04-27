@@ -109,13 +109,13 @@ The production `app/services/llm.py` targets Ollama at `http://localhost:11434` 
 
 ### Failure Rate
 
-| Check | Count | Rate |
-| --- | --- | --- |
-| Total calls | 24 | — |
-| HTTP errors (4xx / 5xx) | 0 | 0.0% |
-| Timeouts | 0 | 0.0% |
-| Empty response (`content == ""`) | 0 | 0.0% |
-| **Overall call failure rate** | **0** | **0.0%** |
+| Check                            | Count | Rate     |
+| -------------------------------- | ----- | -------- |
+| Total calls                      | 24    | —        |
+| HTTP errors (4xx / 5xx)          | 0     | 0.0%     |
+| Timeouts                         | 0     | 0.0%     |
+| Empty response (`content == ""`) | 0     | 0.0%     |
+| **Overall call failure rate**    | **0** | **0.0%** |
 
 All 24 calls returned non-empty completions. The benchmark measured happy-path latency only; no fault injection (backend unavailability, timeout simulation) was performed. Production `generate()` in `llm.py` emits `status="failure"` on exception and `status="dropped"` on empty content — both paths remain untested at this baseline stage.
 
