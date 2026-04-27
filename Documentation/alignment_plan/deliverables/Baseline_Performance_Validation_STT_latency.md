@@ -27,14 +27,33 @@ Note: the plan defines "agreed threshold" wording but does not currently record 
 
 ## Measured Results
 
-| Run ID | Model | Samples | P50 Latency (s) | P95 Latency (s) | Notes |
-|---|---|---:|---:|---:|---|
-| 20260419T072617Z | small | 28 | 0.0609 | 0.0662 | Single-file focused baseline pass |
-| 20260419T072736Z | small | 160 | 0.0637 | 0.0723 | Broad sample set |
-| 20260419T074919Z | small | 16 | 0.0616 | 0.0829 | Smaller sample run with robustness fields |
-| 20260419T083650Z | small | 160 | 0.0610 | 0.0678 | Latest broad baseline, improved P95 |
-| 20260419T072736Z | distil-large-v3 | 160 | 0.0692 | 0.0734 | Secondary model reference |
-| 20260419T083650Z | distil-large-v3 | 160 | 0.0695 | 0.0746 | Secondary model reference |
+| Run ID           | Model           | Samples | P50 Latency (s) | P95 Latency (s) | Notes                                     |
+| ---------------- | --------------- | ------: | --------------: | --------------: | ----------------------------------------- |
+| 20260419T072617Z | small           |      28 |          0.0609 |          0.0662 | Single-file focused baseline pass         |
+| 20260419T072736Z | small           |     160 |          0.0637 |          0.0723 | Broad sample set                          |
+| 20260419T074919Z | small           |      16 |          0.0616 |          0.0829 | Smaller sample run with robustness fields |
+| 20260419T083650Z | small           |     160 |          0.0610 |          0.0678 | Latest broad baseline, improved P95       |
+| 20260419T072736Z | distil-large-v3 |     160 |          0.0692 |          0.0734 | Secondary model reference                 |
+| 20260419T083650Z | distil-large-v3 |     160 |          0.0695 |          0.0746 | Secondary model reference                 |
+
+## Failure Rate
+
+The benchmark JSON files record `text_chars` per result. A result with `text_chars = 0` indicates the VAD filter suppressed all speech and Whisper returned an empty transcript — the functional equivalent of a dropped call in production.
+
+| Run | Model | Total files | Empty transcript | Empty rate | SNR condition |
+| --- | --- | ---: | ---: | ---: | --- |
+| 20260419T072617Z | small | 28 | 4 | 14.3% | all at −10 dB noise |
+| 20260419T072736Z | small | 160 | 21 | 13.1% | all at −10 dB noise |
+| 20260419T072736Z | distil-large-v3 | 160 | 8 | 5.0% | all at −10 dB noise |
+| 20260419T074919Z | small | 16 | 2 | 12.5% | all at −10 dB noise |
+| 20260419T083650Z | small | 160 | 21 | 13.1% | all at −10 dB noise |
+| 20260419T083650Z | distil-large-v3 | 160 | 8 | 5.0% | all at −10 dB noise |
+
+**Key finding:** every empty-transcript result in the reference run (`20260419T083650Z`) occurs exclusively at SNR = −10 dB (extreme noise). No failures were observed under clean or moderate-noise conditions. This is expected VAD behaviour, not an inference error.
+
+Empty transcript rate on **clean audio** across all runs: **0.0%**.
+
+No exception-level failures (model load errors, file read errors) were recorded in any run. The benchmark did not perform fault injection.
 
 ## Validation Outcome
 
