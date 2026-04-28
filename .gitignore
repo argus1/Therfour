@@ -15,6 +15,8 @@ models/**/*.partial
 models/**/*.tmp
 # Large model binaries — commit the stub JSON instead, hydrate locally
 models/**/*.gguf
+models/**/*.onnx
+models/**/*.onnx.json
 benchmarks/results/
 third_party/audio_quality_testing_samples/
 

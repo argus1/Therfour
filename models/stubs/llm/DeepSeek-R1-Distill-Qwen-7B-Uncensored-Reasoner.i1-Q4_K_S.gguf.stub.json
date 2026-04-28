@@ -1,0 +1,13 @@
+{
+  "name": "DeepSeek-R1-Distill-Qwen-7B-Uncensored-Reasoner.i1-Q4_K_S.gguf",
+  "backend": "llm",
+  "target_path": "models/llm/DeepSeek-R1-Distill-Qwen-7B-Uncensored-Reasoner.i1-Q4_K_S.gguf",
+  "source": {
+    "provider": "huggingface",
+    "repo": "mradermacher/DeepSeek-R1-Distill-Qwen-7B-Uncensored-Reasoner-i1-GGUF",
+    "filename": "DeepSeek-R1-Distill-Qwen-7B-Uncensored-Reasoner.i1-Q4_K_S.gguf"
+  },
+  "approx_size_gb": 4.2,
+  "vram_target": "<=8GB",
+  "notes": "iMatrix Q4_K_S quantization by mradermacher. Ollama model name: deepseek-r1-distill-qwen-7b-uncensored-reasoner:i1-q4-k-s. Hydrate with: python scripts/fetch_stub.py models/stubs/llm/DeepSeek-R1-Distill-Qwen-7B-Uncensored-Reasoner.i1-Q4_K_S.gguf.stub.json"
+}

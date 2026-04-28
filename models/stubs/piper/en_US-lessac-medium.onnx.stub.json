@@ -3,8 +3,10 @@
   "backend": "piper",
   "target_path": "models/piper/en_US-lessac-medium.onnx",
   "source": {
-    "provider": "google_drive",
-    "file_id": "REPLACE_WITH_DRIVE_FILE_ID"
+    "provider": "huggingface",
+    "repo": "rhasspy/piper-voices",
+    "filename": "en/en_US/lessac/medium/en_US-lessac-medium.onnx"
   },
-  "notes": "Replace file_id with the shared Google Drive file id for the Piper ONNX artifact."
+  "approx_size_gb": 0.06,
+  "notes": "Piper TTS voice model (en_US lessac medium). Hydrate with: python scripts/fetch_stub.py models/stubs/piper/en_US-lessac-medium.onnx.stub.json"
 }

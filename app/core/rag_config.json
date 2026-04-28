@@ -23,7 +23,7 @@
       "method": "keyword",
       "default_category": "general",
       "llm": {
-        "model": "qwen3.5-35b-a3b:q2-k-xl",
+        "model": "deepseek-r1-distill-qwen-7b-uncensored-reasoner:i1-q4-k-s",
         "timeout_s": 10,
         "strict": true
       },
