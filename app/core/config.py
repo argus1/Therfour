@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     piper_binary: str = "piper"
 
     # ── LLM – Ollama ─────────────────────────────────────────────────────────
+    llm_provider: Literal["ollama", "lmstudio"] = "ollama"
+    # Keep this separate so LM Studio can be phased out for a custom interface later.
+    llm_temperature: float = 0.0
+    llm_max_history_messages: int = 8
     ollama_base_url: str = "http://localhost:11434"
     # Name Ollama knows the model by (used in every /api/chat request).
     ollama_model: str = "qwen3.5-35b-a3b:q2-k-xl"
@@ -69,6 +73,10 @@ class Settings(BaseSettings):
     ollama_model_gguf_path: str = "models/llm/Qwen3.5-35B-A3B-UD-Q2_K_XL.gguf"
     # How long (seconds) to wait for Ollama to become reachable on startup.
     ollama_ready_timeout: float = 120.0
+
+    # ── LLM – LM Studio (temporary backend target) ─────────────────────────
+    lmstudio_base_url: str = "http://10.0.0.132:1234/v1"
+    lmstudio_model: str = "deepseek-r1-distill-qwen-7b-uncensored-reasoner-i1"
 
     # ── RAG ─────────────────────────────────────────────────────────────────
     rag_enabled: bool = False
