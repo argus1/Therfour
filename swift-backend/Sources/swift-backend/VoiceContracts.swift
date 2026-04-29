@@ -1,5 +1,7 @@
 import Foundation
 
+// MARK: - Error Types
+
 enum VoiceServiceError: Error, Equatable {
     case unsupported
     case invalidResponse
@@ -8,6 +10,8 @@ enum VoiceServiceError: Error, Equatable {
     case emptyOutput
     case noSpeechDetected
 }
+
+// MARK: - Service Protocols
 
 protocol SpeechTranscriber: Sendable {
     func transcribe(audioPCM16kMono: Data, languageHint: String?) async throws
@@ -22,6 +26,8 @@ protocol ChatResponder: Sendable {
     func generateReply(messages: [ChatMessage], systemPrompt: String) async throws -> String
 }
 
+// MARK: - Capability Probing Protocols
+
 protocol STTCapabilityProbe {
     func probeSTTCapabilities() async -> STTBackendCapabilities
 }
@@ -33,6 +39,18 @@ protocol TTSCapabilityProbe {
 protocol LLMCapabilityProbe {
     func probeLLMCapabilities() async -> LLMBackendCapabilities
 }
+
+// MARK: - Turn Processing Protocol
+
+protocol TurnProcessor: Sendable {
+    func processTurn(audioPCM16kMono: Data, languageHint: String?) async throws
+        -> TurnProcessingResult
+
+    func currentConversation() -> [ChatMessage]
+    func resetConversation()
+}
+
+// MARK: - Capability Structures
 
 struct STTBackendCapabilities: Equatable {
     let supportedLanguages: Set<String>

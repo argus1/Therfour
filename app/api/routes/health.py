@@ -16,7 +16,7 @@ async def health_check() -> HealthResponse:
         version=settings.app_version,
         services={
             "stt": f"faster-whisper/{settings.whisper_model}",
-            "tts": "piper",
+            "tts": settings.tts_backend,
             "llm": f"ollama/{settings.ollama_model}",
         },
     )

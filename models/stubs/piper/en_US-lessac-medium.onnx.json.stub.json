@@ -1,0 +1,12 @@
+{
+  "name": "en_US-lessac-medium.onnx.json",
+  "backend": "piper",
+  "target_path": "models/piper/en_US-lessac-medium.onnx.json",
+  "source": {
+    "provider": "huggingface",
+    "repo": "rhasspy/piper-voices",
+    "filename": "en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
+  },
+  "approx_size_gb": 0.001,
+  "notes": "Piper TTS voice config JSON (en_US lessac medium). Hydrate with: python scripts/fetch_stub.py models/stubs/piper/en_US-lessac-medium.onnx.json.stub.json"
+}

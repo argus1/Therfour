@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+import base64
+from collections import deque
+
 import numpy as np
 import pytest
 
-from app.services.telephony import downsample, mulaw_to_pcm16, pcm16_to_mulaw, upsample
+from app.services.telephony import (
+    CallSession,
+    downsample,
+    mulaw_to_pcm16,
+    pcm16_to_mulaw,
+    upsample,
+)
+from app.models.schemas import TranscriptionResult
+from app.services.vad import StreamingSpeechDetector
 
 
 def _make_pcm16(n_samples: int, value: int = 0) -> bytes:
@@ -54,3 +65,186 @@ def test_upsample_same_rate_is_noop() -> None:
     out = upsample(pcm, from_rate=8000, to_rate=8000)
     original = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
     np.testing.assert_array_equal(out, original)
+
+
+class _FakeIterator:
+    def __init__(self, events: list[dict[str, int] | None]) -> None:
+        self._events = deque(events)
+
+    def __call__(self, x):
+        return self._events.popleft() if self._events else None
+
+    def reset_states(self) -> None:
+        self._events.clear()
+
+
+def test_streaming_speech_detector_finalizes_on_end_event() -> None:
+    detector = StreamingSpeechDetector(
+        vad_iterator=_FakeIterator([None, {"start": 0}, None, {"end": 1536}])
+    )
+    chunk = np.ones(2048, dtype=np.float32)
+
+    finalized = detector.process_chunk(chunk)
+
+    assert len(finalized) == 1
+    assert finalized[0].dtype == np.float32
+    assert len(finalized[0]) >= 1536
+
+
+def test_streaming_speech_detector_flushes_active_speech() -> None:
+    detector = StreamingSpeechDetector(vad_iterator=_FakeIterator([{"start": 0}, None]))
+    chunk = np.ones(1024, dtype=np.float32)
+
+    detector.process_chunk(chunk)
+    flushed = detector.flush()
+
+    assert flushed is not None
+    assert flushed.dtype == np.float32
+    assert len(flushed) >= 1024
+
+
+class _DummyWebSocket:
+    async def iter_text(self):  # pragma: no cover - not used in this test
+        if False:
+            yield ""
+
+
+class _FakeSpeechDetector:
+    def __init__(self, finalized_turns: list[np.ndarray]) -> None:
+        self._turns = list(finalized_turns)
+
+    def process_chunk(self, samples: np.ndarray) -> list[np.ndarray]:
+        assert isinstance(samples, np.ndarray)
+        return self._turns
+
+    def flush(self):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_call_session_on_media_enqueues_vad_finalized_turn(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    finalized = np.ones(1600, dtype=np.float32)
+    session._speech_detector = _FakeSpeechDetector([finalized])
+
+    captured: list[np.ndarray] = []
+    monkeypatch.setattr(session, "_enqueue_turn", lambda audio: captured.append(audio))
+
+    pcm = np.full(160, 1000, dtype=np.int16).tobytes()
+    mulaw = pcm16_to_mulaw(pcm)
+    payload_b64 = base64.b64encode(mulaw).decode("ascii")
+
+    await session._on_media(payload_b64)
+
+    assert len(captured) == 1
+    np.testing.assert_array_equal(captured[0], finalized)
+
+
+@pytest.mark.asyncio
+async def test_run_turn_drops_audio_shorter_than_minimum(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(100, dtype=np.float32)
+
+    captured_reasons: list[str] = []
+    monkeypatch.setattr(
+        session,
+        "_log_turn_drop",
+        lambda reason, **kwargs: captured_reasons.append(reason),
+    )
+
+    await session._run_turn(audio)
+
+    assert captured_reasons == ["too_short"]
+    assert session._conversation == []
+
+
+@pytest.mark.asyncio
+async def test_run_turn_drops_no_speech_without_calling_llm(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="",
+            language="en",
+            confidence=0.0,
+            language_confidence=0.0,
+            transcript_quality_score=0.0,
+            backend_name="faster-whisper",
+            fallback_used=True,
+            failure_reason="no_speech",
+        )
+
+    async def _unexpected_llm(_conversation):
+        raise AssertionError("LLM should not be called for no-speech turns")
+
+    async def _unexpected_tts(_text, *, language=None):
+        raise AssertionError("TTS should not be called for no-speech turns")
+
+    captured_reasons: list[str] = []
+    monkeypatch.setattr(
+        session,
+        "_log_turn_drop",
+        lambda reason, **kwargs: captured_reasons.append(reason),
+    )
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.llm.generate", _unexpected_llm)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _unexpected_tts)
+
+    await session._run_turn(audio)
+
+    assert captured_reasons == ["no_speech"]
+    assert session._conversation == []
+
+
+@pytest.mark.asyncio
+async def test_run_turn_sticks_to_sherpa_after_first_sherpa_result(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+    preferred_backends: list[str | None] = []
+
+    responses = [
+        TranscriptionResult(
+            text="hello",
+            language="en",
+            confidence=0.9,
+            language_confidence=0.0,
+            transcript_quality_score=0.9,
+            backend_name="sherpa-onnx",
+            fallback_used=True,
+            failure_reason="",
+        ),
+        TranscriptionResult(
+            text="again",
+            language="en",
+            confidence=0.9,
+            language_confidence=0.0,
+            transcript_quality_score=0.9,
+            backend_name="sherpa-onnx",
+            fallback_used=True,
+            failure_reason="",
+        ),
+    ]
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        preferred_backends.append(preferred_backend)
+        return responses.pop(0)
+
+    async def _fake_generate(_conversation):
+        return "ok"
+
+    async def _fake_synthesize(_text, *, language=None):
+        return np.zeros(22050, dtype=np.float32)
+
+    async def _fake_send_audio(_samples):
+        return None
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.llm.generate", _fake_generate)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+
+    await session._run_turn(audio)
+    await session._run_turn(audio)
+
+    assert preferred_backends == [None, "sherpa"]

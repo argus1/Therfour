@@ -4,6 +4,22 @@ struct TranscriptionResult: Codable, Equatable {
     let text: String
     let language: String
     let confidence: Double
+    let languageConfidence: Double?
+    let transcriptQualityScore: Double?
+    let backendName: String?
+    let fallbackUsed: Bool?
+    let failureReason: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case text
+        case language
+        case confidence
+        case languageConfidence = "language_confidence"
+        case transcriptQualityScore = "transcript_quality_score"
+        case backendName = "backend_name"
+        case fallbackUsed = "fallback_used"
+        case failureReason = "failure_reason"
+    }
 }
 
 struct HealthResponse: Codable, Equatable {

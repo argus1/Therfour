@@ -1,6 +1,6 @@
 import Foundation
 
-actor CallTurnProcessor {
+actor CallTurnProcessor: TurnProcessor {
     private let stt: SpeechTranscriber
     private let llm: ChatResponder
     private let tts: SpeechSynthesizer

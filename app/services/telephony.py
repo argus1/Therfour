@@ -20,6 +20,7 @@ from scipy.signal import resample_poly
 from app.core.config import settings
 from app.services import llm, stt, tts
 from app.services.tts import PIPER_SAMPLE_RATE
+from app.services.vad import StreamingSpeechDetector, silero_vad_available
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +79,21 @@ class CallSession:
         self._stream_sid: Optional[str] = None
         self._audio_buffer: list[bytes] = []
         self._conversation: list[dict] = []
+        self._pending_turns: list[np.ndarray] = []
         self._silence_timer: Optional[asyncio.TimerHandle] = None
         self._processing = False
         self._loop = asyncio.get_event_loop()
+        self._speech_detector: Optional[StreamingSpeechDetector] = None
+        self._stt_backend_sticky: Optional[stt.STTBackendName] = None
+
+        if settings.vad_enabled:
+            if silero_vad_available():
+                try:
+                    self._speech_detector = StreamingSpeechDetector()
+                except Exception:
+                    logger.exception("Failed to initialize Silero VAD; falling back to silence timer")
+            else:
+                logger.warning("Silero VAD is not available; using silence timeout fallback")
 
     # ── Public entry point ────────────────────────────────────────────────────
 
@@ -105,14 +118,31 @@ class CallSession:
             elif event == "stop":
                 logger.info("Stream stopped")
                 self._cancel_silence_timer()
+                if self._speech_detector is not None:
+                    flushed = self._speech_detector.flush()
+                    if flushed is not None:
+                        self._enqueue_turn(flushed)
                 break
 
     # ── Media handling ────────────────────────────────────────────────────────
 
     async def _on_media(self, payload_b64: str) -> None:
         """Decode a Twilio media chunk and append it to the audio buffer."""
-        self._audio_buffer.append(base64.b64decode(payload_b64))
-        self._reset_silence_timer()
+        chunk = base64.b64decode(payload_b64)
+        if self._speech_detector is None:
+            self._audio_buffer.append(chunk)
+            self._reset_silence_timer()
+            return
+
+        pcm8k = mulaw_to_pcm16(chunk)
+        float16k = upsample(
+            pcm8k,
+            settings.audio_sample_rate_twilio,
+            settings.audio_sample_rate_whisper,
+        )
+        finalized_turns = self._speech_detector.process_chunk(float16k)
+        for voiced_turn in finalized_turns:
+            self._enqueue_turn(voiced_turn)
 
     def _cancel_silence_timer(self) -> None:
         if self._silence_timer is not None:
@@ -128,11 +158,17 @@ class CallSession:
     def _schedule_turn(self) -> None:
         """Called from the event loop after silence_timeout_s of silence."""
         if not self._processing and self._audio_buffer:
-            asyncio.ensure_future(self._process_turn())
+            asyncio.ensure_future(self._process_buffered_turn())
+
+    def _enqueue_turn(self, audio: np.ndarray) -> None:
+        if self._processing:
+            self._pending_turns.append(audio)
+            return
+        asyncio.ensure_future(self._process_audio_turn(audio))
 
     # ── Turn processing ───────────────────────────────────────────────────────
 
-    async def _process_turn(self) -> None:
+    async def _process_buffered_turn(self) -> None:
         self._processing = True
         audio_chunks, self._audio_buffer = self._audio_buffer, []
         try:
@@ -143,35 +179,79 @@ class CallSession:
                 settings.audio_sample_rate_twilio,
                 settings.audio_sample_rate_whisper,
             )
-
-            # Discard utterances that are too short to be meaningful
-            min_samples = int(settings.min_audio_duration_s * settings.audio_sample_rate_whisper)
-            if len(float16k) < min_samples:
-                return
-
-            # 2. Speech-to-text
-            result = await stt.transcribe(float16k)
-            text = result.text.strip()
-            if not text:
-                return
-            logger.info("Transcribed [%s]: %s", result.language, text)
-
-            # 3. LLM – append to conversation history for multi-turn context
-            self._conversation.append({"role": "user", "content": text})
-            reply = await llm.generate(self._conversation)
-            self._conversation.append({"role": "assistant", "content": reply})
-            logger.info("LLM reply: %s", reply)
-
-            # 4. TTS
-            speech_samples = await tts.synthesize(reply)
-
-            # 5. Downsample, encode to μ-law, and stream back to Twilio
-            await self._send_audio(speech_samples)
-
+            await self._run_turn(float16k)
         except Exception:
-            logger.exception("Error during call turn processing")
+            logger.exception("Error during buffered call turn processing")
         finally:
-            self._processing = False
+            self._finish_turn_processing()
+
+    async def _process_audio_turn(self, audio: np.ndarray) -> None:
+        self._processing = True
+        try:
+            await self._run_turn(audio)
+        except Exception:
+            logger.exception("Error during voiced call turn processing")
+        finally:
+            self._finish_turn_processing()
+
+    async def _run_turn(self, audio: np.ndarray) -> None:
+        min_samples = int(settings.min_audio_duration_s * settings.audio_sample_rate_whisper)
+        if len(audio) < min_samples:
+            self._log_turn_drop("too_short", audio=audio)
+            return
+
+        result = await stt.transcribe(audio, preferred_backend=self._stt_backend_sticky)
+
+        if result.backend_name == "sherpa-onnx" and self._stt_backend_sticky != "sherpa":
+            self._stt_backend_sticky = "sherpa"
+            logger.info("STT backend switched to session-sticky Sherpa-ONNX")
+
+        text = result.text.strip()
+        if not text:
+            self._log_turn_drop(result.failure_reason or "no_speech", audio=audio, result=result)
+            return
+        logger.info(
+            "Transcribed [%s via %s]: %s",
+            result.language,
+            result.backend_name,
+            text,
+        )
+
+        self._conversation.append({"role": "user", "content": text})
+        reply = await llm.generate(self._conversation)
+        self._conversation.append({"role": "assistant", "content": reply})
+        logger.info("LLM reply: %s", reply)
+
+        speech_samples = await tts.synthesize(reply, language=result.language)
+
+        await self._send_audio(speech_samples)
+
+    def _finish_turn_processing(self) -> None:
+        self._processing = False
+        if self._pending_turns:
+            next_audio = self._pending_turns.pop(0)
+            asyncio.ensure_future(self._process_audio_turn(next_audio))
+
+    def _log_turn_drop(
+        self,
+        reason: str,
+        *,
+        audio: np.ndarray,
+        result: Optional[stt.TranscriptionResult] = None,
+    ) -> None:
+        details = {
+            "reason": reason,
+            "audio_ms": round((len(audio) / settings.audio_sample_rate_whisper) * 1000),
+        }
+        if result is not None:
+            details.update(
+                {
+                    "backend": result.backend_name,
+                    "fallback_used": result.fallback_used,
+                    "quality": f"{result.transcript_quality_score:.2f}",
+                }
+            )
+        logger.info("Dropping turn: %s", details)
 
     # ── Audio sending ─────────────────────────────────────────────────────────
 
