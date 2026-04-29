@@ -1,0 +1,13 @@
+{
+  "name": "Kunoichi-DPO-v2-7B-Q4_K_S-imatrix.gguf",
+  "backend": "llm",
+  "target_path": "models/llm/Kunoichi-DPO-v2-7B-Q4_K_S-imatrix.gguf",
+  "source": {
+    "provider": "huggingface",
+    "repo": "Lewdiculous/Kunoichi-DPO-v2-7B-GGUF-Imatrix",
+    "filename": "Kunoichi-DPO-v2-7B-Q4_K_S-imatrix.gguf"
+  },
+  "approx_size_gb": 4.0,
+  "vram_target": "<=8GB",
+  "notes": "Q4_K_S imatrix quantization. Hydrate with: python scripts/fetch_stub.py models/stubs/llm/Kunoichi-DPO-v2-7B-Q4_K_S-imatrix.gguf.stub.json"
+}

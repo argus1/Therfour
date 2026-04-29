@@ -193,17 +193,18 @@ artifacts:
 - large binary artifacts under `models/` are tracked with Git LFS
 
 Use the stub flow when you want the repo to carry only metadata for a model stored
-in Google Drive. A stub manifest records the target path, provider, Drive file id,
-and optional checksum without committing the actual artifact.
+in Google Drive or Hugging Face. A stub manifest records the target path, provider,
+source metadata, and optional checksum without committing the actual artifact.
 
 Hydrate a stub into a local file:
 
 ```bash
-python scripts/fetch_gdrive_stub.py models/stubs/piper/en_US-lessac-medium.onnx.stub.json
+python scripts/fetch_stub.py models/stubs/piper/en_US-lessac-medium.onnx.stub.json
+python scripts/fetch_stub.py models/stubs/llm/Kunoichi-DPO-v2-7B-Q4_K_S-imatrix.gguf.stub.json
 ```
 
-To update a stub for your own Drive-backed asset, copy one of the example manifests
-in `models/stubs/`, replace the `file_id`, and optionally add a `sha256`.
+To update a stub for your own asset, copy one of the example manifests in
+`models/stubs/`, update the provider source fields, and optionally add a `sha256`.
 
 If you intentionally commit a large model artifact into `models/`, install Git LFS
 first:
