@@ -222,7 +222,7 @@ class CallSession:
         self._conversation.append({"role": "assistant", "content": reply})
         logger.info("LLM reply: %s", reply)
 
-        speech_samples = await tts.synthesize(reply)
+        speech_samples = await tts.synthesize(reply, language=result.language)
 
         await self._send_audio(speech_samples)
 

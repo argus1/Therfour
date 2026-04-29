@@ -178,7 +178,7 @@ async def test_run_turn_drops_no_speech_without_calling_llm(monkeypatch) -> None
     async def _unexpected_llm(_conversation):
         raise AssertionError("LLM should not be called for no-speech turns")
 
-    async def _unexpected_tts(_text):
+    async def _unexpected_tts(_text, *, language=None):
         raise AssertionError("TTS should not be called for no-speech turns")
 
     captured_reasons: list[str] = []
@@ -233,7 +233,7 @@ async def test_run_turn_sticks_to_sherpa_after_first_sherpa_result(monkeypatch) 
     async def _fake_generate(_conversation):
         return "ok"
 
-    async def _fake_synthesize(_text):
+    async def _fake_synthesize(_text, *, language=None):
         return np.zeros(22050, dtype=np.float32)
 
     async def _fake_send_audio(_samples):

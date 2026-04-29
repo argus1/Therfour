@@ -55,7 +55,16 @@ class Settings(BaseSettings):
     vad_speech_pad_ms: int = 96
     vad_preroll_ms: int = 96
 
-    # ── TTS – Piper ──────────────────────────────────────────────────────────
+    # ── TTS ──────────────────────────────────────────────────────────────────
+    tts_backend: Literal["piper", "f5_http"] = "f5_http"
+    tts_fallback_backend: Literal["none", "piper"] = "piper"
+    # F5 HTTP endpoint that accepts {text, voice, language, options}
+    f5_tts_endpoint: str = "http://localhost:8880/synthesize"
+    f5_tts_voice: str = "en_default"
+    f5_tts_timeout_s: float = 30.0
+    f5_tts_sample_rate: int = 24000
+
+    # Piper fallback/default backend settings
     piper_model_path: str = "models/piper/en_US-lessac-medium.onnx"
     piper_binary: str = "piper"
 

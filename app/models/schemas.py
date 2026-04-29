@@ -5,6 +5,18 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class VoiceServiceError(RuntimeError):
+    """Base class for voice-pipeline service failures."""
+
+
+class UnsupportedError(VoiceServiceError):
+    """Raised when a backend or feature is unavailable/unsupported."""
+
+
+class EmptyOutputError(VoiceServiceError):
+    """Raised when a voice backend returns no usable output."""
+
+
 class TranscriptionResult(BaseModel):
     """Output from speech-to-text transcription."""
 
