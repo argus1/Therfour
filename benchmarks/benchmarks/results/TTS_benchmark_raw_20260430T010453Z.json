@@ -1,0 +1,355 @@
+{
+  "timestamp_utc": "20260430T010453Z",
+  "piper_model": "/Users/argussun/Documents/Therfour/models/en_US-lessac-medium.onnx",
+  "f5_endpoint": "http://localhost:8880/synthesize",
+  "f5_voice": "en_default",
+  "benchmark_runs": 5,
+  "f5_available": true,
+  "f5_probe_note": "HTTP 200 at http://localhost:8880/health",
+  "summary": {
+    "piper/easy": {
+      "success_count": 5,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 1256.8804590000013,
+      "p95_ms": 1613.0220409999936,
+      "mean_ms": 1130.1316418000033,
+      "min_ms": 415.40620900000005,
+      "max_ms": 1613.0220409999936,
+      "failure_reasons": []
+    },
+    "piper/moderate": {
+      "success_count": 5,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 2261.9773330000044,
+      "p95_ms": 2341.0749999999894,
+      "mean_ms": 2248.688000000004,
+      "min_ms": 2171.7592500000364,
+      "max_ms": 2341.0749999999894,
+      "failure_reasons": []
+    },
+    "piper/difficult": {
+      "success_count": 5,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 1741.5286670000114,
+      "p95_ms": 1967.938874999959,
+      "mean_ms": 1789.6363001999816,
+      "min_ms": 1726.558541999907,
+      "max_ms": 1967.938874999959,
+      "failure_reasons": []
+    },
+    "f5/easy": {
+      "success_count": 0,
+      "failure_count": 5,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "timed out"
+      ]
+    },
+    "f5/moderate": {
+      "success_count": 0,
+      "failure_count": 5,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "timed out"
+      ]
+    },
+    "f5/difficult": {
+      "success_count": 0,
+      "failure_count": 5,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "timed out"
+      ]
+    }
+  },
+  "results": [
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": 415.40620900000005,
+      "audio_bytes": 323628,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 1,
+      "latency_ms": 1002.3681670000002,
+      "audio_bytes": 315948,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 1,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 2,
+      "latency_ms": 1613.0220409999936,
+      "audio_bytes": 322092,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 2,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 3,
+      "latency_ms": 1256.8804590000013,
+      "audio_bytes": 312876,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 3,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 4,
+      "latency_ms": 1362.9813330000218,
+      "audio_bytes": 312364,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 4,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": 2341.0749999999894,
+      "audio_bytes": 643116,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 1,
+      "latency_ms": 2294.7024169999963,
+      "audio_bytes": 661036,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 1,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 2,
+      "latency_ms": 2261.9773330000044,
+      "audio_bytes": 647212,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 2,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 3,
+      "latency_ms": 2173.9259999999945,
+      "audio_bytes": 656940,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 3,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 4,
+      "latency_ms": 2171.7592500000364,
+      "audio_bytes": 659500,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 4,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": 1778.774791999922,
+      "audio_bytes": 508972,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 1,
+      "latency_ms": 1733.380625000109,
+      "audio_bytes": 501804,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 1,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 2,
+      "latency_ms": 1741.5286670000114,
+      "audio_bytes": 497708,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 2,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 3,
+      "latency_ms": 1967.938874999959,
+      "audio_bytes": 506412,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 3,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 4,
+      "latency_ms": 1726.558541999907,
+      "audio_bytes": 496172,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 4,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "timed out"
+    }
+  ]
+}

@@ -1,0 +1,355 @@
+{
+  "timestamp_utc": "20260430T004108Z",
+  "piper_model": "/Users/argussun/Documents/Therfour/models/en_US-lessac-medium.onnx",
+  "f5_endpoint": "http://localhost:8880/synthesize",
+  "f5_voice": "en_default",
+  "benchmark_runs": 5,
+  "f5_available": false,
+  "f5_probe_note": "[Errno 61] Connection refused",
+  "summary": {
+    "piper/easy": {
+      "success_count": 5,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 355.8485829999998,
+      "p95_ms": 418.7082919999998,
+      "mean_ms": 371.8020417999999,
+      "min_ms": 331.52029199999976,
+      "max_ms": 418.7082919999998,
+      "failure_reasons": []
+    },
+    "piper/moderate": {
+      "success_count": 5,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 644.4973340000004,
+      "p95_ms": 690.0582499999998,
+      "mean_ms": 649.2898836,
+      "min_ms": 612.0282499999998,
+      "max_ms": 690.0582499999998,
+      "failure_reasons": []
+    },
+    "piper/difficult": {
+      "success_count": 5,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 538.7760840000002,
+      "p95_ms": 655.5429159999999,
+      "mean_ms": 550.5408916,
+      "min_ms": 487.4323330000001,
+      "max_ms": 655.5429159999999,
+      "failure_reasons": []
+    },
+    "f5/easy": {
+      "success_count": 0,
+      "failure_count": 5,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+      ]
+    },
+    "f5/moderate": {
+      "success_count": 0,
+      "failure_count": 5,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+      ]
+    },
+    "f5/difficult": {
+      "success_count": 0,
+      "failure_count": 5,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+      ]
+    }
+  },
+  "results": [
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": 413.18983300000014,
+      "audio_bytes": 316460,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 1,
+      "latency_ms": 339.7432090000001,
+      "audio_bytes": 315948,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 1,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 2,
+      "latency_ms": 331.52029199999976,
+      "audio_bytes": 309292,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 2,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 3,
+      "latency_ms": 355.8485829999998,
+      "audio_bytes": 326188,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 3,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 4,
+      "latency_ms": 418.7082919999998,
+      "audio_bytes": 327724,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 4,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": 644.4973340000004,
+      "audio_bytes": 644140,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 1,
+      "latency_ms": 613.1173750000003,
+      "audio_bytes": 643628,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 1,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 2,
+      "latency_ms": 612.0282499999998,
+      "audio_bytes": 654892,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 2,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 3,
+      "latency_ms": 690.0582499999998,
+      "audio_bytes": 652332,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 3,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 4,
+      "latency_ms": 686.7482090000001,
+      "audio_bytes": 653868,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 4,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": 655.5429159999999,
+      "audio_bytes": 494636,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 1,
+      "latency_ms": 493.2129999999999,
+      "audio_bytes": 513580,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 1,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 2,
+      "latency_ms": 538.7760840000002,
+      "audio_bytes": 497708,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 2,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 3,
+      "latency_ms": 487.4323330000001,
+      "audio_bytes": 507948,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 3,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 4,
+      "latency_ms": 577.740125,
+      "audio_bytes": 483372,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 4,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: [Errno 61] Connection refused"
+    }
+  ]
+}

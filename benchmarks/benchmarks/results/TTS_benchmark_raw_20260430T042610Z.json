@@ -1,0 +1,228 @@
+{
+  "timestamp_utc": "20260430T042610Z",
+  "piper_model": "/Users/argussun/Documents/Therfour/models/en_US-lessac-medium.onnx",
+  "f5_endpoint": "http://localhost:8880/synthesize",
+  "f5_voice": "en_default",
+  "benchmark_runs": 2,
+  "f5_mlx_available": true,
+  "f5_mlx_probe_note": "f5-tts-mlx installed (model: lucasnewman/f5-tts-mlx)",
+  "f5_http_available": false,
+  "f5_http_probe_note": "F5-TTS HTTP not available at http://localhost:8880/synthesize",
+  "summary": {
+    "piper/easy": {
+      "success_count": 2,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 1506.8119169999998,
+      "p95_ms": 1566.534667,
+      "mean_ms": 1506.8119169999998,
+      "min_ms": 1447.0891669999996,
+      "max_ms": 1566.534667,
+      "failure_reasons": []
+    },
+    "piper/moderate": {
+      "success_count": 2,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 2330.316479,
+      "p95_ms": 2389.0235000000002,
+      "mean_ms": 2330.316479,
+      "min_ms": 2271.6094580000004,
+      "max_ms": 2389.0235000000002,
+      "failure_reasons": []
+    },
+    "piper/difficult": {
+      "success_count": 2,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 1479.8926669999996,
+      "p95_ms": 1577.4002500000001,
+      "mean_ms": 1479.8926669999996,
+      "min_ms": 1382.385083999999,
+      "max_ms": 1577.4002500000001,
+      "failure_reasons": []
+    },
+    "f5/easy": {
+      "success_count": 0,
+      "failure_count": 0,
+      "failure_rate": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": []
+    },
+    "f5/moderate": {
+      "success_count": 0,
+      "failure_count": 0,
+      "failure_rate": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": []
+    },
+    "f5/difficult": {
+      "success_count": 0,
+      "failure_count": 0,
+      "failure_rate": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": []
+    },
+    "f5_mlx/easy": {
+      "success_count": 0,
+      "failure_count": 2,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "Reference audio must have a sample rate of 24kHz"
+      ]
+    },
+    "f5_mlx/moderate": {
+      "success_count": 0,
+      "failure_count": 2,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "Reference audio must have a sample rate of 24kHz"
+      ]
+    },
+    "f5_mlx/difficult": {
+      "success_count": 0,
+      "failure_count": 2,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "Reference audio must have a sample rate of 24kHz"
+      ]
+    }
+  },
+  "results": [
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": 1566.534667,
+      "audio_bytes": 312876,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "Reference audio must have a sample rate of 24kHz"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 1,
+      "latency_ms": 1447.0891669999996,
+      "audio_bytes": 319020,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "easy",
+      "run_index": 1,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "Reference audio must have a sample rate of 24kHz"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": 2389.0235000000002,
+      "audio_bytes": 651820,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "Reference audio must have a sample rate of 24kHz"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 1,
+      "latency_ms": 2271.6094580000004,
+      "audio_bytes": 660012,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "moderate",
+      "run_index": 1,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "Reference audio must have a sample rate of 24kHz"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": 1577.4002500000001,
+      "audio_bytes": 495660,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "Reference audio must have a sample rate of 24kHz"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 1,
+      "latency_ms": 1382.385083999999,
+      "audio_bytes": 494124,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "difficult",
+      "run_index": 1,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "Reference audio must have a sample rate of 24kHz"
+    }
+  ]
+}

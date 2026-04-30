@@ -1,0 +1,355 @@
+{
+  "timestamp_utc": "20260430T021112Z",
+  "piper_model": "/Users/argussun/Documents/Therfour/models/en_US-lessac-medium.onnx",
+  "f5_endpoint": "http://localhost:8880/synthesize",
+  "f5_voice": "en_default",
+  "benchmark_runs": 5,
+  "f5_available": false,
+  "f5_probe_note": "F5-TTS not available (install f5-tts or deploy HTTP service)",
+  "summary": {
+    "piper/easy": {
+      "success_count": 5,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 1791.524291,
+      "p95_ms": 2463.804750000001,
+      "mean_ms": 1955.9011750000004,
+      "min_ms": 1725.3847919999998,
+      "max_ms": 2463.804750000001,
+      "failure_reasons": []
+    },
+    "piper/moderate": {
+      "success_count": 5,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 1967.4895420000028,
+      "p95_ms": 2219.135166000001,
+      "mean_ms": 1684.4168250000007,
+      "min_ms": 1072.449959,
+      "max_ms": 2219.135166000001,
+      "failure_reasons": []
+    },
+    "piper/difficult": {
+      "success_count": 5,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 2337.954667000002,
+      "p95_ms": 2597.5245419999987,
+      "mean_ms": 2420.579075,
+      "min_ms": 2315.9337919999994,
+      "max_ms": 2597.5245419999987,
+      "failure_reasons": []
+    },
+    "f5/easy": {
+      "success_count": 0,
+      "failure_count": 5,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+      ]
+    },
+    "f5/moderate": {
+      "success_count": 0,
+      "failure_count": 5,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+      ]
+    },
+    "f5/difficult": {
+      "success_count": 0,
+      "failure_count": 5,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+      ]
+    }
+  },
+  "results": [
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": 1728.795083,
+      "audio_bytes": 310316,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 1,
+      "latency_ms": 1791.524291,
+      "audio_bytes": 311340,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 1,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 2,
+      "latency_ms": 1725.3847919999998,
+      "audio_bytes": 322092,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 2,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 3,
+      "latency_ms": 2069.996959000001,
+      "audio_bytes": 327724,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 3,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 4,
+      "latency_ms": 2463.804750000001,
+      "audio_bytes": 320044,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "easy",
+      "run_index": 4,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": 2050.6902920000007,
+      "audio_bytes": 646188,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 1,
+      "latency_ms": 1072.449959,
+      "audio_bytes": 648236,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 1,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 2,
+      "latency_ms": 1112.3191659999989,
+      "audio_bytes": 641068,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 2,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 3,
+      "latency_ms": 1967.4895420000028,
+      "audio_bytes": 656428,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 3,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 4,
+      "latency_ms": 2219.135166000001,
+      "audio_bytes": 649772,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "moderate",
+      "run_index": 4,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": 2337.954667000002,
+      "audio_bytes": 497708,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 1,
+      "latency_ms": 2315.9337919999994,
+      "audio_bytes": 488492,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 1,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 2,
+      "latency_ms": 2513.604916000002,
+      "audio_bytes": 496684,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 2,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 3,
+      "latency_ms": 2597.5245419999987,
+      "audio_bytes": 490028,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 3,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 4,
+      "latency_ms": 2337.8774579999977,
+      "audio_bytes": 494636,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5",
+      "passage_id": "difficult",
+      "run_index": 4,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "F5-TTS endpoint unreachable: F5-TTS not available (install f5-tts or deploy HTTP service)"
+    }
+  ]
+}

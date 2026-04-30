@@ -1,0 +1,168 @@
+{
+  "timestamp_utc": "20260430T042918Z",
+  "piper_model": "/Users/argussun/Documents/Therfour/models/en_US-lessac-medium.onnx",
+  "f5_endpoint": "http://localhost:8880/synthesize",
+  "f5_voice": "en_default",
+  "benchmark_runs": 1,
+  "f5_mlx_available": true,
+  "f5_mlx_probe_note": "f5-tts-mlx installed (model: lucasnewman/f5-tts-mlx)",
+  "f5_http_available": false,
+  "f5_http_probe_note": "F5-TTS HTTP not available at http://localhost:8880/synthesize",
+  "summary": {
+    "piper/easy": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 1311.3954579999997,
+      "p95_ms": 1311.3954579999997,
+      "mean_ms": 1311.3954579999997,
+      "min_ms": 1311.3954579999997,
+      "max_ms": 1311.3954579999997,
+      "failure_reasons": []
+    },
+    "piper/moderate": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 4102.186416999999,
+      "p95_ms": 4102.186416999999,
+      "mean_ms": 4102.186416999999,
+      "min_ms": 4102.186416999999,
+      "max_ms": 4102.186416999999,
+      "failure_reasons": []
+    },
+    "piper/difficult": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 2939.1751669999876,
+      "p95_ms": 2939.1751669999876,
+      "mean_ms": 2939.1751669999876,
+      "min_ms": 2939.1751669999876,
+      "max_ms": 2939.1751669999876,
+      "failure_reasons": []
+    },
+    "f5/easy": {
+      "success_count": 0,
+      "failure_count": 0,
+      "failure_rate": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": []
+    },
+    "f5/moderate": {
+      "success_count": 0,
+      "failure_count": 0,
+      "failure_rate": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": []
+    },
+    "f5/difficult": {
+      "success_count": 0,
+      "failure_count": 0,
+      "failure_rate": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": []
+    },
+    "f5_mlx/easy": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 47917.506709,
+      "p95_ms": 47917.506709,
+      "mean_ms": 47917.506709,
+      "min_ms": 47917.506709,
+      "max_ms": 47917.506709,
+      "failure_reasons": []
+    },
+    "f5_mlx/moderate": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 20334.852999999996,
+      "p95_ms": 20334.852999999996,
+      "mean_ms": 20334.852999999996,
+      "min_ms": 20334.852999999996,
+      "max_ms": 20334.852999999996,
+      "failure_reasons": []
+    },
+    "f5_mlx/difficult": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 22306.200750000004,
+      "p95_ms": 22306.200750000004,
+      "mean_ms": 22306.200750000004,
+      "min_ms": 22306.200750000004,
+      "max_ms": 22306.200750000004,
+      "failure_reasons": []
+    }
+  },
+  "results": [
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": 1311.3954579999997,
+      "audio_bytes": 332844,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": 47917.506709,
+      "audio_bytes": 5138,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": 4102.186416999999,
+      "audio_bytes": 642092,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": 20334.852999999996,
+      "audio_bytes": 160974,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": 2939.1751669999876,
+      "audio_bytes": 508460,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": 22306.200750000004,
+      "audio_bytes": 89294,
+      "success": true,
+      "error": null
+    }
+  ]
+}

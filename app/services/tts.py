@@ -11,6 +11,7 @@ import asyncio
 import io
 import logging
 import subprocess
+import tempfile
 import wave
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -114,14 +115,18 @@ def _resolve_f5_voice(language: str | None, requested_voice: str | None) -> str:
     return _DEFAULT_F5_VOICE_BY_LANGUAGE.get(lang_prefix, settings.f5_tts_voice)
 
 
+# F5-TTS MLX local backend outputs 24 kHz; resampled to PIPER_SAMPLE_RATE downstream.
+_F5_MLX_SAMPLE_RATE = 24000
+
+
 def _select_voice(voice: str | None, language: str | None, backend: str) -> VoiceSelection:
     """Resolve requested voice/language to backend-specific voice selection."""
-    if backend == "f5_http":
+    if backend in ("f5_http", "f5_mlx_local"):
         voice_id = _resolve_f5_voice(language=language, requested_voice=voice)
         return VoiceSelection(
             voice_id=voice_id,
             model_path="",
-            sample_rate=settings.f5_tts_sample_rate,
+            sample_rate=_F5_MLX_SAMPLE_RATE,
         )
 
     requested = _normalize_voice_id(voice)
@@ -251,6 +256,55 @@ def _synthesize_piper(
     return samples
 
 
+def _synthesize_f5_mlx_local_sync(
+    text: str,
+    *,
+    voice: str | None = None,
+    language: str | None = None,
+    options: dict[str, Any] | None = None,
+) -> np.ndarray:
+    """Synthesise locally via f5-tts-mlx (Apple Silicon / MLX). Sync; run in executor."""
+    if not text.strip():
+        raise EmptyOutputError("Cannot synthesize empty text")
+
+    try:
+        from f5_tts_mlx.generate import generate  # noqa: PLC0415
+    except ImportError as exc:
+        raise UnsupportedError(
+            "f5-tts-mlx is not installed. Install with: pip install f5-tts-mlx"
+        ) from exc
+
+    normalized_options = _normalize_options(options)
+    # length_scale is inverted speed; convert back to speed for f5-tts-mlx
+    speed = 1.0 / max(0.25, float(normalized_options.get("length_scale", 1.0)))
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp_wav:
+        try:
+            generate(
+                generation_text=text,
+                model_name=settings.f5_mlx_model,
+                speed=speed,
+                output_path=tmp_wav.name,
+            )
+        except Exception as exc:
+            raise UnsupportedError(f"f5-tts-mlx generate() failed: {exc}") from exc
+
+        try:
+            tmp_wav.seek(0)
+            wav_bytes = tmp_wav.read()
+        except Exception as exc:
+            raise UnsupportedError(f"Failed to read f5-tts-mlx output WAV: {exc}") from exc
+
+    if not wav_bytes:
+        raise EmptyOutputError("f5-tts-mlx produced no audio output")
+
+    samples, sample_rate = _decode_wav_or_pcm16(wav_bytes, _F5_MLX_SAMPLE_RATE)
+    if len(samples) == 0:
+        raise EmptyOutputError("f5-tts-mlx produced empty audio")
+
+    return _resample_to_piper_rate(samples, sample_rate)
+
+
 async def _synthesize_f5_http(
     text: str,
     *,
@@ -318,15 +372,27 @@ async def synthesize(
 ) -> np.ndarray:
     """Synthesize *text* to speech, returning float32 PCM at :data:`PIPER_SAMPLE_RATE` Hz."""
     backend = settings.tts_backend.lower()
+    loop = asyncio.get_event_loop()
+
     if backend == "f5_http":
         try:
             return await _synthesize_f5_http(text, voice=voice, language=language, options=options)
         except (UnsupportedError, EmptyOutputError) as exc:
             if settings.tts_fallback_backend != "piper":
                 raise
-            logger.warning("F5-TTS failed (%s); falling back to Piper", exc)
+            logger.warning("F5-TTS HTTP failed (%s); falling back to Piper", exc)
 
-    loop = asyncio.get_event_loop()
+    elif backend == "f5_mlx_local":
+        try:
+            return await loop.run_in_executor(
+                _executor,
+                partial(_synthesize_f5_mlx_local_sync, text, voice=voice, language=language, options=options),
+            )
+        except (UnsupportedError, EmptyOutputError) as exc:
+            if settings.tts_fallback_backend != "piper":
+                raise
+            logger.warning("f5-tts-mlx failed (%s); falling back to Piper", exc)
+
     return await loop.run_in_executor(
         _executor,
         partial(_synthesize_piper, text, voice=voice, language=language, options=options),

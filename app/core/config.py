@@ -56,8 +56,10 @@ class Settings(BaseSettings):
     vad_preroll_ms: int = 96
 
     # ── TTS ──────────────────────────────────────────────────────────────────
-    tts_backend: Literal["piper", "f5_http"] = "f5_http"
+    tts_backend: Literal["piper", "f5_http", "f5_mlx_local"] = "f5_http"
     tts_fallback_backend: Literal["none", "piper"] = "piper"
+    # f5-tts-mlx model name (HuggingFace repo id); only used when tts_backend="f5_mlx_local"
+    f5_mlx_model: str = "lucasnewman/f5-tts-mlx"
     # F5 HTTP endpoint that accepts {text, voice, language, options}
     f5_tts_endpoint: str = "http://localhost:8880/synthesize"
     f5_tts_voice: str = "en_default"
