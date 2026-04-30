@@ -11,3 +11,10 @@ twilio>=9.0.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
 audioop-lts>=0.2.1; python_version >= "3.13"
+
+# ChromaDB and RAG pipeline
+chromadb>=0.4.0
+docling>=0.1.0
+docling-core>=0.1.0
+sentence-transformers>=2.2.0
+pypdf>=4.0.0

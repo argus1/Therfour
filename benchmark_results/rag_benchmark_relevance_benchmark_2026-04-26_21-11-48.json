@@ -1,0 +1,85 @@
+{
+  "experiment_name": "relevance_benchmark",
+  "timestamp": "2026-04-26 21:11:48",
+  "total_queries": 5,
+  "avg_retrieval_time": 0.07959394454956055,
+  "p95_retrieval_time": 0.28589391708374023,
+  "p99_retrieval_time": 0.28589391708374023,
+  "avg_top_similarity": 0.43385120034217833,
+  "avg_similarity_score": 0.08677024006843567,
+  "unique_sources_retrieved": 5,
+  "error_rate": 0.0,
+  "collection_size": 5,
+  "individual_results": [
+    {
+      "query": "What is harm reduction?",
+      "retrieval_time": 0.28589391708374023,
+      "num_results": 5,
+      "top_similarity": 0.42346084117889404,
+      "avg_similarity": 0.08469216823577881,
+      "sources": [
+        "document_2.pdf",
+        "document_0.pdf",
+        "document_4.pdf",
+        "document_1.pdf",
+        "document_3.pdf"
+      ]
+    },
+    {
+      "query": "Where can I get clean needles?",
+      "retrieval_time": 0.03895306587219238,
+      "num_results": 5,
+      "top_similarity": 0.4277447462081909,
+      "avg_similarity": 0.08554894924163818,
+      "sources": [
+        "document_0.pdf",
+        "document_2.pdf",
+        "document_4.pdf",
+        "document_1.pdf",
+        "document_3.pdf"
+      ]
+    },
+    {
+      "query": "How does naloxone work?",
+      "retrieval_time": 0.04766392707824707,
+      "num_results": 5,
+      "top_similarity": 0.4361001253128052,
+      "avg_similarity": 0.08722002506256103,
+      "sources": [
+        "document_1.pdf",
+        "document_4.pdf",
+        "document_2.pdf",
+        "document_0.pdf",
+        "document_3.pdf"
+      ]
+    },
+    {
+      "query": "What is medication-assisted treatment?",
+      "retrieval_time": 0.01267695426940918,
+      "num_results": 5,
+      "top_similarity": 0.5971660912036896,
+      "avg_similarity": 0.11943321824073791,
+      "sources": [
+        "document_4.pdf",
+        "document_1.pdf",
+        "document_2.pdf",
+        "document_0.pdf",
+        "document_3.pdf"
+      ]
+    },
+    {
+      "query": "How do I find peer support?",
+      "retrieval_time": 0.012781858444213867,
+      "num_results": 5,
+      "top_similarity": 0.284784197807312,
+      "avg_similarity": 0.0569568395614624,
+      "sources": [
+        "document_3.pdf",
+        "document_4.pdf",
+        "document_2.pdf",
+        "document_0.pdf",
+        "document_1.pdf"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "experiment_name": "relevance_benchmark_2_queries",
+  "timestamp": "2026-04-22 13:10:18",
+  "total_queries": 4,
+  "avg_retrieval_time": 0.0006139278411865234,
+  "p95_retrieval_time": 0.0014650821685791016,
+  "p99_retrieval_time": 0.0014650821685791016,
+  "precision_at_1": 0.0,
+  "precision_at_3": 0.0,
+  "precision_at_5": 0.0,
+  "precision_at_10": 0.0,
+  "recall_at_5": 0.0,
+  "recall_at_10": 0.0,
+  "stability_score": 1.0513773794912649,
+  "error_rate": 0.0,
+  "individual_results": [
+    {
+      "query": "Where can I get clean syringes?",
+      "retrieval_time": 0.0014650821685791016,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      }
+    },
+    {
+      "query": "How to prevent overdose?",
+      "retrieval_time": 0.0005249977111816406,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      }
+    },
+    {
+      "query": "Where can I get clean syringes?",
+      "retrieval_time": 0.0002377033233642578,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      }
+    },
+    {
+      "query": "How to prevent overdose?",
+      "retrieval_time": 0.00022792816162109375,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      }
+    }
+  ]
+}

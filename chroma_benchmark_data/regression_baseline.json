@@ -1,0 +1,188 @@
+{
+  "experiment_name": "relevance_benchmark_5_queries",
+  "timestamp": "2026-04-26 21:16:25",
+  "total_queries": 15,
+  "avg_retrieval_time": 0.00018823941548665364,
+  "p95_retrieval_time": 0.0003349781036376953,
+  "p99_retrieval_time": 0.0003349781036376953,
+  "precision_at_1": 0.0,
+  "precision_at_3": 0.06666666666666667,
+  "precision_at_5": 0.16,
+  "precision_at_10": 0.1,
+  "recall_at_5": 0.6,
+  "recall_at_10": 0.8,
+  "stability_score": 4.355554224941959,
+  "error_rate": 0.0,
+  "individual_results": [
+    {
+      "query": "Where can I find clean needles?",
+      "retrieval_time": 0.0002181529998779297,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.2,
+        "10": 0.1
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 1.0,
+        "10": 1.0
+      }
+    },
+    {
+      "query": "How do I use naloxone?",
+      "retrieval_time": 0.00017714500427246094,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.2,
+        "10": 0.1
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 1.0,
+        "10": 1.0
+      }
+    },
+    {
+      "query": "What are safer drug use practices?",
+      "retrieval_time": 0.00017404556274414062,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.1
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 1.0
+      }
+    },
+    {
+      "query": "Where can I get treatment for substance use?",
+      "retrieval_time": 0.00017213821411132812,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.3333333333333333,
+        "5": 0.4,
+        "10": 0.2
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.5,
+        "5": 1.0,
+        "10": 1.0
+      }
+    },
+    {
+      "query": "What should I do in case of overdose?",
+      "retrieval_time": 0.00017118453979492188,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      }
+    },
+    {
+      "query": "Where can I find clean needles?",
+      "retrieval_time": 0.00017189979553222656,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.2,
+        "10": 0.1
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 1.0,
+        "10": 1.0
+      }
+    },
+    {
+      "query": "How do I use naloxone?",
+      "retrieval_time": 0.0001704692840576172,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.2,
+        "10": 0.1
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 1.0,
+        "10": 1.0
+      }
+    },
+    {
+      "query": "What are safer drug use practices?",
+      "retrieval_time": 0.0001690387725830078,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.1
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 1.0
+      }
+    },
+    {
+      "query": "Where can I get treatment for substance use?",
+      "retrieval_time": 0.0001690387725830078,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.3333333333333333,
+        "5": 0.4,
+        "10": 0.2
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.5,
+        "5": 1.0,
+        "10": 1.0
+      }
+    },
+    {
+      "query": "What should I do in case of overdose?",
+      "retrieval_time": 0.0001678466796875,
+      "num_retrieved": 10,
+      "precision_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      }
+    }
+  ]
+}

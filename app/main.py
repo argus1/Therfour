@@ -6,7 +6,7 @@ import logging
 
 from fastapi import FastAPI
 
-from app.api.routes import calls, health
+from app.api.routes import calls, health, rag
 from app.core.config import settings
 
 logging.basicConfig(
@@ -22,3 +22,4 @@ app = FastAPI(
 
 app.include_router(health.router, tags=["health"])
 app.include_router(calls.router, tags=["calls"])
+app.include_router(rag.router, tags=["rag"])

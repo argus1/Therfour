@@ -1,0 +1,155 @@
+{
+  "experiment_name": "relevance_benchmark",
+  "timestamp": "2026-04-26 21:16:32",
+  "total_queries": 10,
+  "avg_retrieval_time": 0.04505021572113037,
+  "p95_retrieval_time": 0.2384650707244873,
+  "p99_retrieval_time": 0.2384650707244873,
+  "avg_top_similarity": 0.23056632280349731,
+  "avg_similarity_score": 0.04718698024749756,
+  "unique_sources_retrieved": 5,
+  "error_rate": 0.0,
+  "collection_size": 5,
+  "individual_results": [
+    {
+      "query": "What is harm reduction and how does it work?",
+      "retrieval_time": 0.2384650707244873,
+      "num_results": 5,
+      "top_similarity": 0.34665894508361816,
+      "avg_similarity": 0.06933178901672363,
+      "sources": [
+        "document_2.pdf",
+        "document_0.pdf",
+        "document_1.pdf",
+        "document_4.pdf",
+        "document_3.pdf"
+      ]
+    },
+    {
+      "query": "Where can I find clean needle programs?",
+      "retrieval_time": 0.039991140365600586,
+      "num_results": 5,
+      "top_similarity": 0.42500925064086914,
+      "avg_similarity": 0.08500185012817382,
+      "sources": [
+        "document_0.pdf",
+        "document_2.pdf",
+        "document_4.pdf",
+        "document_1.pdf",
+        "document_3.pdf"
+      ]
+    },
+    {
+      "query": "How does naloxone work in an overdose?",
+      "retrieval_time": 0.03831291198730469,
+      "num_results": 5,
+      "top_similarity": 0.6848413944244385,
+      "avg_similarity": 0.1369682788848877,
+      "sources": [
+        "document_1.pdf",
+        "document_4.pdf",
+        "document_2.pdf",
+        "document_3.pdf",
+        "document_0.pdf"
+      ]
+    },
+    {
+      "query": "What are the benefits of medication-assisted treatment?",
+      "retrieval_time": 0.011947154998779297,
+      "num_results": 5,
+      "top_similarity": 0.3231273889541626,
+      "avg_similarity": 0.06462547779083253,
+      "sources": [
+        "document_4.pdf",
+        "document_3.pdf",
+        "document_0.pdf",
+        "document_2.pdf",
+        "document_1.pdf"
+      ]
+    },
+    {
+      "query": "How can I find peer support groups?",
+      "retrieval_time": 0.011962175369262695,
+      "num_results": 5,
+      "top_similarity": 0.4440556764602661,
+      "avg_similarity": 0.08881113529205323,
+      "sources": [
+        "document_3.pdf",
+        "document_4.pdf",
+        "document_2.pdf",
+        "document_0.pdf",
+        "document_1.pdf"
+      ]
+    },
+    {
+      "query": "What should I do if someone is overdosing?",
+      "retrieval_time": 0.011369943618774414,
+      "num_results": 5,
+      "top_similarity": 0.0,
+      "avg_similarity": 0.0,
+      "sources": [
+        "document_1.pdf",
+        "document_2.pdf",
+        "document_4.pdf",
+        "document_3.pdf",
+        "document_0.pdf"
+      ]
+    },
+    {
+      "query": "Are there safer ways to use drugs?",
+      "retrieval_time": 0.011372089385986328,
+      "num_results": 5,
+      "top_similarity": 0.0,
+      "avg_similarity": 0.0,
+      "sources": [
+        "document_2.pdf",
+        "document_1.pdf",
+        "document_4.pdf",
+        "document_0.pdf",
+        "document_3.pdf"
+      ]
+    },
+    {
+      "query": "What is syringe service programs?",
+      "retrieval_time": 0.010121822357177734,
+      "num_results": 5,
+      "top_similarity": 0.0,
+      "avg_similarity": 0.0,
+      "sources": [
+        "document_0.pdf",
+        "document_4.pdf",
+        "document_2.pdf",
+        "document_3.pdf",
+        "document_1.pdf"
+      ]
+    },
+    {
+      "query": "How do I access treatment for substance use?",
+      "retrieval_time": 0.03984880447387695,
+      "num_results": 5,
+      "top_similarity": 0.08197057247161865,
+      "avg_similarity": 0.027131271362304688,
+      "sources": [
+        "document_2.pdf",
+        "document_4.pdf",
+        "document_1.pdf",
+        "document_0.pdf",
+        "document_3.pdf"
+      ]
+    },
+    {
+      "query": "What are the signs of overdose?",
+      "retrieval_time": 0.03711104393005371,
+      "num_results": 5,
+      "top_similarity": 0.0,
+      "avg_similarity": 0.0,
+      "sources": [
+        "document_1.pdf",
+        "document_2.pdf",
+        "document_4.pdf",
+        "document_3.pdf",
+        "document_0.pdf"
+      ]
+    }
+  ]
+}
