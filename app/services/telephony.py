@@ -3,7 +3,7 @@
 Audio pipeline per conversation turn
 ─────────────────────────────────────
 Inbound  : Twilio μ-law/8 kHz → decode → PCM-16/8 kHz → float32/16 kHz → Whisper
-Outbound : text → Piper → float32/22 kHz → PCM-16/8 kHz → μ-law → Twilio
+Outbound : text → Piper/F5-TTS → float32/22 kHz → PCM-16/8 kHz → μ-law → Twilio
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import numpy as np
 from scipy.signal import resample_poly
 
 from app.core.config import settings
+from app.models.schemas import TTSSynthesisStatus
 from app.services import llm, stt, tts
 from app.services.tts import PIPER_SAMPLE_RATE
 from app.services.vad import StreamingSpeechDetector, silero_vad_available
@@ -25,8 +26,6 @@ from app.services.vad import StreamingSpeechDetector, silero_vad_available
 logger = logging.getLogger(__name__)
 
 # ── μ-law codec ───────────────────────────────────────────────────────────────
-# audioop is part of the Python standard library up to 3.12; audioop-lts
-# provides a drop-in replacement for Python 3.13+.
 try:
     import audioop  # type: ignore[import]
 except ImportError:  # Python 3.13+
@@ -35,7 +34,7 @@ except ImportError:  # Python 3.13+
 
 def mulaw_to_pcm16(data: bytes) -> bytes:
     """Decode 8-bit μ-law bytes to signed 16-bit PCM bytes."""
-    return audioop.ulaw2lin(data, 2)  # sample_width=2 → 16-bit
+    return audioop.ulaw2lin(data, 2)
 
 
 def pcm16_to_mulaw(data: bytes) -> bytes:
@@ -64,14 +63,8 @@ def downsample(samples: np.ndarray, from_rate: int, to_rate: int) -> bytes:
 # ── Call session ──────────────────────────────────────────────────────────────
 
 class CallSession:
-    """Manages the full lifecycle of a single Twilio voice call.
+    """Manages the full lifecycle of a single Twilio voice call."""
 
-    The session consumes messages from a Twilio Media Stream WebSocket,
-    buffers inbound audio, runs the STT → LLM → TTS pipeline when the
-    caller pauses, and streams the synthesised audio back to Twilio.
-    """
-
-    # Twilio sends μ-law audio in ~20 ms frames (160 bytes @ 8 kHz).
     _OUTBOUND_CHUNK = 160
 
     def __init__(self, websocket) -> None:
@@ -127,7 +120,6 @@ class CallSession:
     # ── Media handling ────────────────────────────────────────────────────────
 
     async def _on_media(self, payload_b64: str) -> None:
-        """Decode a Twilio media chunk and append it to the audio buffer."""
         chunk = base64.b64decode(payload_b64)
         if self._speech_detector is None:
             self._audio_buffer.append(chunk)
@@ -156,7 +148,6 @@ class CallSession:
         )
 
     def _schedule_turn(self) -> None:
-        """Called from the event loop after silence_timeout_s of silence."""
         if not self._processing and self._audio_buffer:
             asyncio.ensure_future(self._process_buffered_turn())
 
@@ -172,7 +163,6 @@ class CallSession:
         self._processing = True
         audio_chunks, self._audio_buffer = self._audio_buffer, []
         try:
-            # 1. Decode μ-law and upsample to 16 kHz for Whisper
             pcm8k = b"".join(mulaw_to_pcm16(c) for c in audio_chunks)
             float16k = upsample(
                 pcm8k,
@@ -195,36 +185,79 @@ class CallSession:
             self._finish_turn_processing()
 
     async def _run_turn(self, audio: np.ndarray) -> None:
+        # ── 1. Minimum duration gate ──────────────────────────────────────────
         min_samples = int(settings.min_audio_duration_s * settings.audio_sample_rate_whisper)
         if len(audio) < min_samples:
             self._log_turn_drop("too_short", audio=audio)
             return
 
-        result = await stt.transcribe(audio, preferred_backend=self._stt_backend_sticky)
+        # ── 2. STT ────────────────────────────────────────────────────────────
+        stt_result = await stt.transcribe(audio, preferred_backend=self._stt_backend_sticky)
 
-        if result.backend_name == "sherpa-onnx" and self._stt_backend_sticky != "sherpa":
+        if stt_result.backend_name == "sherpa-onnx" and self._stt_backend_sticky != "sherpa":
             self._stt_backend_sticky = "sherpa"
             logger.info("STT backend switched to session-sticky Sherpa-ONNX")
 
-        text = result.text.strip()
+        text = stt_result.text.strip()
         if not text:
-            self._log_turn_drop(result.failure_reason or "no_speech", audio=audio, result=result)
+            self._log_turn_drop(
+                stt_result.failure_reason or "no_speech",
+                audio=audio,
+                stt_result=stt_result,
+            )
             return
+
         logger.info(
             "Transcribed [%s via %s]: %s",
-            result.language,
-            result.backend_name,
+            stt_result.language,
+            stt_result.backend_name,
             text,
         )
 
+        # ── 3. LLM ────────────────────────────────────────────────────────────
         self._conversation.append({"role": "user", "content": text})
         reply = await llm.generate(self._conversation)
         self._conversation.append({"role": "assistant", "content": reply})
         logger.info("LLM reply: %s", reply)
 
-        speech_samples = await tts.synthesize(reply, language=result.language)
+        # ── 4. TTS ────────────────────────────────────────────────────────────
+        tts_result = await tts.synthesize(reply, language=stt_result.language)
 
-        await self._send_audio(speech_samples)
+        # Log TTS metadata regardless of outcome — distinguishes TTS failures
+        # from STT and LLM failures in structured logs.
+        logger.info(
+            "TTS synthesis: status=%s backend=%s voice=%s lang=%s "
+            "latency_ms=%d audio_ms=%d bytes=%d fallback=%s%s",
+            tts_result.status.value,
+            tts_result.backend_name,
+            tts_result.voice_used,
+            tts_result.language,
+            tts_result.synthesis_latency_ms,
+            tts_result.audio_duration_ms,
+            tts_result.audio_bytes,
+            tts_result.fallback_used,
+            f" failure_reason={tts_result.failure_reason.value}"
+            if tts_result.failure_reason else "",
+        )
+
+        if not tts_result.ok:
+            # TTS failed on all backends — log and drop turn rather than
+            # sending silence to the caller.
+            logger.error(
+                "Dropping turn: TTS failed (reason=%s)",
+                tts_result.failure_reason.value if tts_result.failure_reason else "unknown",
+            )
+            return
+
+        if tts_result.status == TTSSynthesisStatus.fallback_used:
+            logger.warning(
+                "TTS fallback was used (primary=%s fallback=%s)",
+                tts_result.backend_name,
+                "piper",
+            )
+
+        # ── 5. Send audio to caller ───────────────────────────────────────────
+        await self._send_audio(tts_result.audio)
 
     def _finish_turn_processing(self) -> None:
         self._processing = False
@@ -237,18 +270,18 @@ class CallSession:
         reason: str,
         *,
         audio: np.ndarray,
-        result: Optional[stt.TranscriptionResult] = None,
+        stt_result: Optional[stt.TranscriptionResult] = None,
     ) -> None:
-        details = {
+        details: dict = {
             "reason": reason,
             "audio_ms": round((len(audio) / settings.audio_sample_rate_whisper) * 1000),
         }
-        if result is not None:
+        if stt_result is not None:
             details.update(
                 {
-                    "backend": result.backend_name,
-                    "fallback_used": result.fallback_used,
-                    "quality": f"{result.transcript_quality_score:.2f}",
+                    "stt_backend": stt_result.backend_name,
+                    "stt_fallback_used": stt_result.fallback_used,
+                    "stt_quality": f"{stt_result.transcript_quality_score:.2f}",
                 }
             )
         logger.info("Dropping turn: %s", details)
@@ -273,7 +306,6 @@ class CallSession:
                 )
             )
 
-        # Notify Twilio that the response audio has finished
         await self._ws.send_text(
             json.dumps(
                 {
