@@ -143,6 +143,20 @@ async def test_construct_turn_includes_guardrails_and_retrieval_metadata(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_construct_turn_includes_transfer_services_catalog_when_enabled(monkeypatch) -> None:
+    monkeypatch.setattr(llm_service.settings, "rag_enabled", False)
+    monkeypatch.setattr(llm_service.settings, "transfer_services_enabled", True)
+    with patch("app.services.llm.transfer_services.build_prompt_block") as mock_block:
+        mock_block.return_value = "Transfer services catalog (non-emergency custom transfers):\n- sample"
+        turn = await llm_service._construct_turn(
+            [{"role": "user", "content": "Can you transfer me to counseling appointments?"}]
+        )
+
+    system_prompt = turn.messages[0]["content"]
+    assert "Transfer services catalog" in system_prompt
+
+
+@pytest.mark.asyncio
 async def test_generate_uses_lmstudio_endpoint_and_response_shape(monkeypatch) -> None:
     mock_response = MagicMock()
     mock_response.raise_for_status = MagicMock()

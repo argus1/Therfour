@@ -13,11 +13,14 @@ from app.services.telephony import (
     CallSession,
     build_transfer_twiml,
     downsample,
+    get_custom_transfer_post_call_reopen_mode,
+    get_transfer_post_call_reopen_mode,
     mulaw_to_pcm16,
     parse_transfer_directive,
     pcm16_to_mulaw,
     upsample,
 )
+from app.services.telephony import _transfer_confirmation_prompt
 from app.services import waiting_audio
 from app.core.config import settings
 from app.models.schemas import TranscriptionResult
@@ -109,17 +112,25 @@ def test_streaming_speech_detector_flushes_active_speech() -> None:
 
 
 class _DummyWebSocket:
+    def __init__(self) -> None:
+        self.sent_messages: list[str] = []
+
     async def iter_text(self):  # pragma: no cover - not used in this test
         if False:
             yield ""
+
+    async def send_text(self, message: str) -> None:
+        self.sent_messages.append(message)
 
 
 class _FakeSpeechDetector:
     def __init__(self, finalized_turns: list[np.ndarray]) -> None:
         self._turns = list(finalized_turns)
+        self.speech_active = False
 
     def process_chunk(self, samples: np.ndarray) -> list[np.ndarray]:
         assert isinstance(samples, np.ndarray)
+        self.speech_active = bool(self._turns)
         return self._turns
 
     def flush(self):
@@ -135,7 +146,7 @@ async def test_call_session_on_media_enqueues_vad_finalized_turn(monkeypatch) ->
     captured: list[np.ndarray] = []
     monkeypatch.setattr(session, "_enqueue_turn", lambda audio: captured.append(audio))
 
-    pcm = np.full(160, 1000, dtype=np.int16).tobytes()
+    pcm = np.full(320, 1000, dtype=np.int16).tobytes()
     mulaw = pcm16_to_mulaw(pcm)
     payload_b64 = base64.b64encode(mulaw).decode("ascii")
 
@@ -143,6 +154,31 @@ async def test_call_session_on_media_enqueues_vad_finalized_turn(monkeypatch) ->
 
     assert len(captured) == 1
     np.testing.assert_array_equal(captured[0], finalized)
+
+
+@pytest.mark.asyncio
+async def test_call_session_interrupts_active_turn_on_speech_start() -> None:
+    websocket = _DummyWebSocket()
+    session = CallSession(websocket)
+    session._stream_sid = "MZ123"
+    session._processing = True
+    session._speech_detector = StreamingSpeechDetector(vad_iterator=_FakeIterator([{"start": 0}]))
+
+    async def _long_running_turn() -> None:
+        await asyncio.sleep(60)
+
+    task = asyncio.create_task(_long_running_turn())
+    session._active_turn_task = task
+
+    pcm = np.full(320, 1000, dtype=np.int16).tobytes()
+    mulaw = pcm16_to_mulaw(pcm)
+    payload_b64 = base64.b64encode(mulaw).decode("ascii")
+
+    await session._on_media(payload_b64)
+    await asyncio.sleep(0)
+
+    assert task.cancelled() is True
+    assert any('"event": "clear"' in message for message in websocket.sent_messages)
 
 
 @pytest.mark.asyncio
@@ -346,6 +382,16 @@ def test_parse_transfer_directive_returns_plain_reply_when_no_directive() -> Non
     assert spoken == "Let us focus on your immediate safety."
 
 
+def test_is_end_call_intent_detection() -> None:
+    assert CallSession._is_end_call_intent("I think that's all for today") is True
+    assert CallSession._is_end_call_intent("please end the call") is True
+    assert CallSession._is_end_call_intent("I'm good, you can hang up now") is True
+    assert CallSession._is_end_call_intent("can you explain naloxone") is False
+    assert CallSession._is_end_call_intent("bye for now") is False
+    assert CallSession._is_end_call_intent("goodbye") is False
+    assert CallSession._is_end_call_intent("I'm good") is False
+
+
 def test_build_transfer_twiml_adds_sip_headers(monkeypatch) -> None:
     monkeypatch.setattr(settings, "transfer_allow_custom_targets", True)
     monkeypatch.setattr(settings, "transfer_allowed_sip_domains", "example.com")
@@ -379,6 +425,8 @@ async def test_run_turn_executes_transfer_when_directive_present(monkeypatch) ->
     session = CallSession(_DummyWebSocket())
     audio = np.zeros(6000, dtype=np.float32)
 
+    monkeypatch.setattr(settings, "transfer_confirmation_required", False)
+
     async def _fake_transcribe(_audio, language=None, preferred_backend=None):
         return TranscriptionResult(
             text="Please transfer me to 988",
@@ -411,3 +459,408 @@ async def test_run_turn_executes_transfer_when_directive_present(monkeypatch) ->
     await session._run_turn(audio)
 
     assert transfer_calls == [("number", "988", "Connecting you to 988 now.")]
+
+
+@pytest.mark.asyncio
+async def test_run_turn_asks_are_we_done_on_end_call_intent(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="I think that's all for now",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    synthesized_texts: list[str] = []
+
+    async def _fake_synthesize(text, *, language=None):
+        synthesized_texts.append(text)
+        return np.zeros(22050, dtype=np.float32)
+
+    async def _fake_send_audio(_samples):
+        pass
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+
+    await session._run_turn(audio)
+
+    assert session._awaiting_done_confirmation is True
+    assert any("Are we done?" in t for t in synthesized_texts)
+
+
+@pytest.mark.asyncio
+async def test_done_confirmation_yes_starts_terminator_sequence(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+    session._awaiting_done_confirmation = True
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="yes",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    synthesized_texts: list[str] = []
+
+    async def _fake_synthesize(text, *, language=None):
+        synthesized_texts.append(text)
+        return np.zeros(22050, dtype=np.float32)
+
+    async def _fake_send_audio(_samples):
+        pass
+
+    async def _fake_presence_loop(_language):
+        return None
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr("app.services.telephony.call_flow_phrases.random_terminator", lambda: "Test terminator")
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+    monkeypatch.setattr(session, "_run_end_call_presence_loop", _fake_presence_loop)
+
+    await session._run_turn(audio)
+
+    assert session._awaiting_done_confirmation is False
+    assert session._in_end_call_presence_flow is True
+    assert any("Test terminator" in t for t in synthesized_texts)
+
+
+def test_transfer_confirmation_prompt_returns_target_specific_message() -> None:
+    assert "911 emergency services" in _transfer_confirmation_prompt("911")
+    assert "988 Suicide and Crisis Lifeline" in _transfer_confirmation_prompt("988")
+    assert "permission" in _transfer_confirmation_prompt("+14155551212")
+
+
+def test_get_transfer_post_call_reopen_mode_compat_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "transfer_post_call_reopen_mode", "off")
+    monkeypatch.setattr(settings, "transfer_stay_on_line_enabled", True)
+    assert get_transfer_post_call_reopen_mode() == "auto"
+
+
+def test_get_transfer_post_call_reopen_mode_prefers_explicit_mode(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "transfer_post_call_reopen_mode", "prompt")
+    monkeypatch.setattr(settings, "transfer_stay_on_line_enabled", False)
+    assert get_transfer_post_call_reopen_mode() == "prompt"
+
+
+def test_get_custom_transfer_post_call_reopen_mode(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "transfer_custom_post_call_reopen_mode", "prompt")
+    assert get_custom_transfer_post_call_reopen_mode() == "prompt"
+
+
+@pytest.mark.asyncio
+async def test_run_turn_enters_transfer_confirmation_when_required(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    monkeypatch.setattr(settings, "transfer_confirmation_required", True)
+    monkeypatch.setattr(settings, "transfer_post_call_reopen_mode", "off")
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="Please transfer me to 911",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    async def _fake_generate(_conversation):
+        return "TRANSFER:911\nConnecting you to emergency services now."
+
+    synthesized_texts: list[str] = []
+
+    async def _fake_synthesize(text, *, language=None):
+        synthesized_texts.append(text)
+        return np.zeros(22050, dtype=np.float32)
+
+    async def _fake_send_audio(_samples):
+        pass
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.llm.generate", _fake_generate)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+
+    await session._run_turn(audio)
+
+    assert session._in_transfer_confirmation is True
+    assert session._pending_transfer is not None
+    assert session._pending_transfer.target == "911"
+    # Confirmation question should have been spoken
+    assert any("permission" in t.lower() for t in synthesized_texts)
+    assert session._awaiting_transfer_permission is True
+    assert session._awaiting_post_call_reopen_preference is False
+
+
+@pytest.mark.asyncio
+async def test_transfer_confirmation_yes_executes_transfer(monkeypatch) -> None:
+    from app.services.telephony import TransferDirective
+
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    # Pre-load pending transfer state
+    session._in_transfer_confirmation = True
+    session._pending_transfer = TransferDirective(
+        target_kind="number", target="911", metadata={}
+    )
+    session._pending_transfer_spoken = "Connecting you to emergency services now."
+    session._awaiting_transfer_permission = True
+    session._pending_post_call_reopen = False
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="yes",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    transfer_calls: list[tuple] = []
+
+    async def _fake_transfer(transfer, announcement: str, *, enable_post_call_reopen=None) -> bool:
+        transfer_calls.append((transfer.target, announcement, enable_post_call_reopen))
+        return True
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr(session, "_transfer_call", _fake_transfer)
+
+    await session._run_turn(audio)
+
+    assert transfer_calls == [("911", "Connecting you to emergency services now.", False)]
+    assert session._in_transfer_confirmation is False
+    assert session._pending_transfer is None
+
+
+@pytest.mark.asyncio
+async def test_transfer_confirmation_no_cancels_transfer(monkeypatch) -> None:
+    from app.services.telephony import TransferDirective
+
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    session._in_transfer_confirmation = True
+    session._pending_transfer = TransferDirective(
+        target_kind="number", target="988", metadata={}
+    )
+    session._pending_transfer_spoken = "Connecting you to 988 now."
+    session._awaiting_transfer_permission = True
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="no",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    synthesized_texts: list[str] = []
+
+    async def _fake_synthesize(text, *, language=None):
+        synthesized_texts.append(text)
+        return np.zeros(22050, dtype=np.float32)
+
+    async def _fake_send_audio(_samples):
+        pass
+
+    async def _unexpected_transfer(transfer, announcement):
+        raise AssertionError("Transfer should not run after caller says no")
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+    monkeypatch.setattr(session, "_transfer_call", _unexpected_transfer)
+
+    await session._run_turn(audio)
+
+    assert session._in_transfer_confirmation is False
+    assert session._pending_transfer is None
+    assert any("won't transfer" in t.lower() for t in synthesized_texts)
+
+
+def test_build_transfer_twiml_includes_action_url_when_provided(monkeypatch) -> None:
+    twiml = build_transfer_twiml(
+        "number",
+        "988",
+        "Connecting you to 988.",
+        action_url="https://example.com/calls/transfer-completed",
+    )
+    assert 'action="https://example.com/calls/transfer-completed"' in twiml
+    assert "<Dial" in twiml
+    assert "988" in twiml
+
+
+def test_build_transfer_twiml_rejects_custom_target_not_in_service_catalog(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "transfer_allow_custom_targets", True)
+    monkeypatch.setattr(settings, "transfer_allowed_numbers", "+14155550100,+14155550101")
+    monkeypatch.setattr(settings, "transfer_services_enabled", True)
+    monkeypatch.setattr(
+        settings,
+        "transfer_services_config_path",
+        "app/core/transfer_services.json",
+    )
+    with pytest.raises(ValueError):
+        build_transfer_twiml(
+            "number",
+            "+14155559999",
+            "Connecting now.",
+        )
+
+
+@pytest.mark.asyncio
+async def test_custom_transfer_prompt_mode_reopen_preference_yes(monkeypatch) -> None:
+    from app.services.telephony import TransferDirective
+
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    monkeypatch.setattr(settings, "transfer_custom_post_call_reopen_mode", "prompt")
+
+    session._in_transfer_confirmation = True
+    session._pending_transfer = TransferDirective(
+        target_kind="number", target="+14155550100", metadata={}
+    )
+    session._pending_transfer_spoken = "Connecting you now."
+    session._awaiting_post_call_reopen_preference = True
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="yes",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    transfer_calls: list[tuple] = []
+
+    async def _fake_transfer(transfer, announcement: str, *, enable_post_call_reopen=None) -> bool:
+        transfer_calls.append((transfer.target, announcement, enable_post_call_reopen))
+        return True
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr(session, "_transfer_call", _fake_transfer)
+
+    await session._run_turn(audio)
+
+    assert transfer_calls == [('+14155550100', 'Connecting you now.', True)]
+
+
+@pytest.mark.asyncio
+async def test_transfer_confirmation_yes_then_prompt_reopen_preference(monkeypatch) -> None:
+    from app.services.telephony import TransferDirective
+
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    monkeypatch.setattr(settings, "transfer_post_call_reopen_mode", "prompt")
+
+    session._in_transfer_confirmation = True
+    session._pending_transfer = TransferDirective(
+        target_kind="number", target="988", metadata={}
+    )
+    session._pending_transfer_spoken = "Connecting you to 988 now."
+    session._awaiting_transfer_permission = True
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="yes",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    synthesized_texts: list[str] = []
+
+    async def _fake_synthesize(text, *, language=None):
+        synthesized_texts.append(text)
+        return np.zeros(22050, dtype=np.float32)
+
+    async def _fake_send_audio(_samples):
+        pass
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+
+    await session._run_turn(audio)
+
+    assert session._awaiting_transfer_permission is False
+    assert session._awaiting_post_call_reopen_preference is True
+    assert any("come back on the line" in text.lower() for text in synthesized_texts)
+
+
+@pytest.mark.asyncio
+async def test_prompt_reopen_yes_executes_transfer_with_reopen(monkeypatch) -> None:
+    from app.services.telephony import TransferDirective
+
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    session._in_transfer_confirmation = True
+    session._pending_transfer = TransferDirective(
+        target_kind="number", target="988", metadata={}
+    )
+    session._pending_transfer_spoken = "Connecting you to 988 now."
+    session._awaiting_post_call_reopen_preference = True
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="yes",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    transfer_calls: list[tuple] = []
+
+    async def _fake_transfer(transfer, announcement: str, *, enable_post_call_reopen=None) -> bool:
+        transfer_calls.append((transfer.target, announcement, enable_post_call_reopen))
+        return True
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr(session, "_transfer_call", _fake_transfer)
+
+    await session._run_turn(audio)
+
+    assert transfer_calls == [("988", "Connecting you to 988 now.", True)]
+    assert session._in_transfer_confirmation is False
+    assert session._pending_transfer is None

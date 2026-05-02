@@ -37,6 +37,34 @@ class Settings(BaseSettings):
     transfer_allowed_sip_domains: str = ""
     # strict: reject metadata for PSTN targets; compat: keep metadata in logs.
     transfer_metadata_mode: Literal["strict", "compat"] = "compat"
+    # Require verbal caller confirmation before executing a 911/988 transfer.
+    transfer_confirmation_required: bool = True
+    # Post-call re-engagement behavior for 911/988 transfers:
+    # - off: never request post-call reopening
+    # - auto: always request reopening after operator disconnects
+    # - prompt: ask the caller before transfer whether Terris should reopen
+    transfer_post_call_reopen_mode: Literal["off", "auto", "prompt"] = "off"
+    # Controls whether custom (non-911/988) transfers are selected from the
+    # transfer services catalog file.
+    transfer_services_enabled: bool = True
+    # JSON file describing allowed custom transfer services and their use cases.
+    transfer_services_config_path: str = "app/core/transfer_services.json"
+    # Post-call re-engagement behavior for custom transfers:
+    # - off: never reopen after destination disconnects
+    # - auto: always reopen after destination disconnects
+    # - prompt: ask caller before transfer whether Terris should reopen
+    transfer_custom_post_call_reopen_mode: Literal["off", "auto", "prompt"] = "off"
+    # Deprecated compatibility flag. If true and mode is "off", behavior maps to
+    # "auto" to preserve previous deployments.
+    transfer_stay_on_line_enabled: bool = False
+    # Enables randomized call openers/terminators from call flow phrase catalog.
+    call_flow_phrases_enabled: bool = True
+    # JSON file containing opener/terminator phrase lists.
+    call_flow_phrases_config_path: str = "app/core/call_flow_phrases.json"
+    # Delay between terminator and each "Are you still there?" round.
+    call_end_presence_delay_s: float = 12.0
+    # Number of "Are you still there?" rounds before ending call.
+    call_end_presence_rounds: int = 2
 
     # ── STT – faster-whisper ─────────────────────────────────────────────────
     whisper_model: str = "small"
@@ -115,6 +143,8 @@ class Settings(BaseSettings):
     rag_waiting_audio_delay_s: float = 0.35
     # Directory containing phrase and ambient wav assets used during RAG wait time.
     rag_waiting_audio_assets_dir: str = "app/assets/waiting_audio"
+    # Interrupt active assistant generation/playback when caller speech resumes.
+    turn_interrupt_enabled: bool = True
 
 
     # ── Audio pipeline ───────────────────────────────────────────────────────

@@ -30,7 +30,14 @@ from app.models.schemas import (
     TransferHarnessRequest,
     TransferHarnessResponse,
 )
-from app.services.telephony import CallSession, build_transfer_twiml, twilio_transfer_call_update
+from app.services import call_flow_phrases
+from app.services.telephony import (
+    CallSession,
+    build_transfer_twiml,
+    get_custom_transfer_post_call_reopen_mode,
+    get_transfer_post_call_reopen_mode,
+    twilio_transfer_call_update,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,11 +95,53 @@ async def inbound_call(request: Request) -> Response:
     scheme = "wss" if request.url.scheme == "https" else "ws"
     stream_url = f"{scheme}://{host}/calls/stream"
 
+    opener = call_flow_phrases.random_opener()
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
-        "<Say>You have reached the harm reduction helpline. "
-        "How can I help you today?</Say>"
+        f"<Say>{opener}</Say>"
+        f'<Connect><Stream url="{stream_url}" /></Connect>'
+        "</Response>"
+    )
+    return Response(content=twiml, media_type="application/xml")
+
+
+@router.post("/calls/transfer-completed")
+async def transfer_completed(request: Request) -> Response:
+    """Twilio fires this after a transferred 911/988 operator ends the call.
+
+    Only reached when post-call reopen mode is ``auto`` or caller-approved via
+    ``prompt`` mode. Returns TwiML
+    that re-opens a Media Stream so Terris can check in with the caller and let
+    them confirm it is safe to disconnect.
+
+    Note: full three-party monitoring *during* the 911/988 call is not possible
+    via Twilio Media Streams – the bridge is direct between the caller and PSAP.
+    This endpoint handles the post-operator-hangup re-engagement only.
+    """
+    if (
+        get_transfer_post_call_reopen_mode() == "off"
+        and get_custom_transfer_post_call_reopen_mode() == "off"
+    ):
+        # Safety valve: if the feature is off, just hang up gracefully.
+        twiml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            "<Response>"
+            "<Say>The emergency call has ended. Take care and call us back if you need support.</Say>"
+            "<Hangup/>"
+            "</Response>"
+        )
+        return Response(content=twiml, media_type="application/xml")
+
+    host = request.headers.get("host") or settings.public_host
+    scheme = "wss" if request.url.scheme == "https" else "ws"
+    stream_url = f"{scheme}://{host}/calls/stream"
+    twiml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<Response>"
+        "<Say>The operator has ended the call. "
+        "I'm still here if you need support. "
+        "Say \"you can go\" whenever you're ready for me to hang up.</Say>"
         f'<Connect><Stream url="{stream_url}" /></Connect>'
         "</Response>"
     )

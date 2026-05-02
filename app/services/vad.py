@@ -103,6 +103,10 @@ class StreamingSpeechDetector:
 
         return finalized
 
+    @property
+    def speech_active(self) -> bool:
+        return self._speech_active
+
     def flush(self) -> Optional[np.ndarray]:
         if self._remainder.size:
             padded = np.pad(

@@ -205,6 +205,28 @@ TRANSFER_METADATA_MODE=compat
 RAG_WAITING_AUDIO_ENABLED=true
 RAG_WAITING_AUDIO_DELAY_S=0.35
 RAG_WAITING_AUDIO_ASSETS_DIR=app/assets/waiting_audio
+TRANSFER_CONFIRMATION_REQUIRED=true
+TRANSFER_POST_CALL_REOPEN_MODE=off
+TRANSFER_SERVICES_ENABLED=true
+TRANSFER_SERVICES_CONFIG_PATH=app/core/transfer_services.json
+TRANSFER_CUSTOM_POST_CALL_REOPEN_MODE=prompt
+CALL_FLOW_PHRASES_ENABLED=true
+CALL_FLOW_PHRASES_CONFIG_PATH=app/core/call_flow_phrases.json
+CALL_END_PRESENCE_DELAY_S=12
+CALL_END_PRESENCE_ROUNDS=2
+```
+
+Recommended emergency post-call reopen presets:
+
+```env
+# 1) Strict safety baseline: never reopen after 911/988 operator disconnect
+TRANSFER_POST_CALL_REOPEN_MODE=off
+
+# 2) Continuity focused: always reopen after operator disconnect
+TRANSFER_POST_CALL_REOPEN_MODE=auto
+
+# 3) Caller-choice flow: ask caller before transfer whether Terris should reopen
+TRANSFER_POST_CALL_REOPEN_MODE=prompt
 ```
 
 Transfer config behavior:
@@ -221,6 +243,23 @@ Transfer config behavior:
 - `RAG_WAITING_AUDIO_DELAY_S`: grace delay before filler playback starts.
 - `RAG_WAITING_AUDIO_ASSETS_DIR`: directory for phrase/ambient `.wav` assets copied from HealthCoacher.
   Current phrase selection supports `en`, `zh`, `yue`, and `ja`, with fallback to English.
+- `TURN_INTERRUPT_ENABLED`: cancels active assistant generation/playback and clears Twilio outbound audio when caller barges in.
+- `TRANSFER_CONFIRMATION_REQUIRED`: asks caller for verbal confirmation before 911/988 transfer is executed.
+- `TRANSFER_POST_CALL_REOPEN_MODE`:
+  - `off`: never reopen after 911/988 operator disconnect.
+  - `auto`: always reopen after 911/988 operator disconnect.
+  - `prompt`: ask caller before transfer whether Terris should reopen.
+- `TRANSFER_SERVICES_ENABLED`: enables catalog-driven custom transfer offerings.
+- `TRANSFER_SERVICES_CONFIG_PATH`: JSON file defining custom transfer services
+  (name/description/target) Terris is allowed to offer.
+- `TRANSFER_CUSTOM_POST_CALL_REOPEN_MODE`:
+  - `off`: never reopen after custom transfer destination disconnect.
+  - `auto`: always reopen after custom transfer destination disconnect.
+  - `prompt`: ask caller before custom transfer whether Terris should reopen.
+- `CALL_FLOW_PHRASES_ENABLED`: enables randomized openers/terminators from phrase catalog.
+- `CALL_FLOW_PHRASES_CONFIG_PATH`: JSON file containing five openers and five terminators.
+- `CALL_END_PRESENCE_DELAY_S`: delay between terminator and each `Are you still there?` round.
+- `CALL_END_PRESENCE_ROUNDS`: number of `Are you still there?` rounds before Terris ends call.
 
 Harness examples:
 
@@ -338,3 +377,4 @@ git add .gitattributes models/llm/<your-model>.gguf
 | `RAG_WAITING_AUDIO_ENABLED`     | `false`                                 | Plays filler phrase and ambient audio during RAG wait |
 | `RAG_WAITING_AUDIO_DELAY_S`     | `0.35`                                  | Delay before waiting audio starts                     |
 | `RAG_WAITING_AUDIO_ASSETS_DIR`  | `app/assets/waiting_audio`              | Waiting-audio asset directory                         |
+| `TURN_INTERRUPT_ENABLED`        | `true`                                  | Interrupt active assistant turn on caller speech      |

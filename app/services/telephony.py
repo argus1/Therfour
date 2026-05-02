@@ -23,8 +23,10 @@ import numpy as np
 from scipy.signal import resample_poly
 
 from app.core.config import settings
+from app.services import call_flow_phrases
 from app.services import llm, stt, tts
 from app.services import waiting_audio
+from app.services import transfer_services
 from app.services.stt_confidence import LowConfidenceHandler
 from app.services.tts import PIPER_SAMPLE_RATE
 from app.services.vad import StreamingSpeechDetector, silero_vad_available
@@ -42,6 +44,19 @@ class TransferDirective:
     target_kind: Literal["number", "sip"]
     target: str
     metadata: dict[str, str]
+
+
+def get_transfer_post_call_reopen_mode() -> Literal["off", "auto", "prompt"]:
+    """Resolve effective post-call reopen mode with legacy compatibility."""
+    mode = settings.transfer_post_call_reopen_mode
+    if mode == "off" and settings.transfer_stay_on_line_enabled:
+        return "auto"
+    return mode
+
+
+def get_custom_transfer_post_call_reopen_mode() -> Literal["off", "auto", "prompt"]:
+    """Resolve post-call reopen mode for non-emergency custom transfers."""
+    return settings.transfer_custom_post_call_reopen_mode
 
 # ── μ-law codec ───────────────────────────────────────────────────────────────
 try:
@@ -97,10 +112,22 @@ class CallSession:
         self._loop = asyncio.get_event_loop()
         self._speech_detector: Optional[StreamingSpeechDetector] = None
         self._stt_backend_sticky: Optional[stt.STTBackendName] = None
+        self._active_turn_task: Optional[asyncio.Task] = None
         # Low-confidence confirmation state
         self._in_confirmation_flow: bool = False
         self._confirmation_retry_count: int = 0
         self._pending_low_confidence_text: str = ""
+        # Transfer confirmation state (verbal consent before 911/988/custom transfer)
+        self._in_transfer_confirmation: bool = False
+        self._pending_transfer: Optional[TransferDirective] = None
+        self._pending_transfer_spoken: str = ""
+        self._awaiting_transfer_permission: bool = False
+        self._awaiting_post_call_reopen_preference: bool = False
+        self._pending_post_call_reopen: Optional[bool] = None
+        # End-call terminator flow state
+        self._awaiting_done_confirmation: bool = False
+        self._in_end_call_presence_flow: bool = False
+        self._end_call_presence_task: Optional[asyncio.Task] = None
 
         if settings.vad_enabled:
             if silero_vad_available():
@@ -135,6 +162,7 @@ class CallSession:
             elif event == "stop":
                 logger.info("Stream stopped")
                 self._cancel_silence_timer()
+                self._cancel_end_call_presence_task()
                 if self._speech_detector is not None:
                     flushed = self._speech_detector.flush()
                     if flushed is not None:
@@ -146,6 +174,10 @@ class CallSession:
     async def _on_media(self, payload_b64: str) -> None:
         chunk = base64.b64decode(payload_b64)
         if self._speech_detector is None:
+            if settings.turn_interrupt_enabled and self._processing:
+                pcm8k = mulaw_to_pcm16(chunk)
+                if self._chunk_has_speech(pcm8k):
+                    await self._interrupt_current_turn("caller_barge_in")
             self._audio_buffer.append(chunk)
             self._reset_silence_timer()
             return
@@ -156,7 +188,13 @@ class CallSession:
             settings.audio_sample_rate_twilio,
             settings.audio_sample_rate_whisper,
         )
+        was_active = bool(getattr(self._speech_detector, "speech_active", False))
         finalized_turns = self._speech_detector.process_chunk(float16k)
+        speech_started = (not was_active) and bool(
+            getattr(self._speech_detector, "speech_active", False)
+        )
+        if speech_started and settings.turn_interrupt_enabled and self._processing:
+            await self._interrupt_current_turn("caller_barge_in")
         for voiced_turn in finalized_turns:
             self._enqueue_turn(voiced_turn)
 
@@ -184,6 +222,7 @@ class CallSession:
     # ── Turn processing ───────────────────────────────────────────────────────
 
     async def _process_buffered_turn(self) -> None:
+        self._active_turn_task = asyncio.current_task()
         self._processing = True
         audio_chunks, self._audio_buffer = self._audio_buffer, []
         try:
@@ -194,18 +233,27 @@ class CallSession:
                 settings.audio_sample_rate_whisper,
             )
             await self._run_turn(float16k)
+        except asyncio.CancelledError:
+            logger.info("Buffered call turn interrupted")
         except Exception:
             logger.exception("Error during buffered call turn processing")
         finally:
+            if self._active_turn_task is asyncio.current_task():
+                self._active_turn_task = None
             self._finish_turn_processing()
 
     async def _process_audio_turn(self, audio: np.ndarray) -> None:
+        self._active_turn_task = asyncio.current_task()
         self._processing = True
         try:
             await self._run_turn(audio)
+        except asyncio.CancelledError:
+            logger.info("Voiced call turn interrupted")
         except Exception:
             logger.exception("Error during voiced call turn processing")
         finally:
+            if self._active_turn_task is asyncio.current_task():
+                self._active_turn_task = None
             self._finish_turn_processing()
 
     async def _run_turn(self, audio: np.ndarray) -> None:
@@ -238,9 +286,27 @@ class CallSession:
             text,
         )
 
-        # ── 2.5. Handle low-confidence confirmation flow ───────────────────────
+        # ── 2.5. Handle active confirmation flows (transfer takes priority) ────
+        if self._in_transfer_confirmation:
+            await self._handle_transfer_confirmation_response(text, stt_result)
+            return
+
+        if self._awaiting_done_confirmation:
+            await self._handle_done_confirmation_response(text, stt_result)
+            return
+
         if self._in_confirmation_flow:
             await self._handle_confirmation_response(text, stt_result)
+            return
+
+        # Any caller response during terminator-presence checks reopens dialog.
+        if self._in_end_call_presence_flow:
+            logger.info("Caller reinitiated conversation during end-call presence flow")
+            self._in_end_call_presence_flow = False
+            self._cancel_end_call_presence_task()
+
+        if self._is_end_call_intent(text):
+            await self._ask_are_we_done(stt_result.language)
             return
 
         # ── 3. Check for low confidence (before LLM) ──────────────────────────
@@ -256,6 +322,14 @@ class CallSession:
         logger.info("LLM reply: %s", spoken_reply)
 
         if transfer is not None:
+            should_prompt_post_call = (
+                _post_call_reopen_mode_for_transfer(transfer) == "prompt"
+            )
+            if settings.transfer_confirmation_required or should_prompt_post_call:
+                await self._enter_transfer_confirmation(
+                    transfer, spoken_reply, stt_result.language
+                )
+                return
             transfer_message = spoken_reply or _default_transfer_announcement(transfer.target)
             transferred = await self._transfer_call(transfer, transfer_message)
             if transferred:
@@ -282,6 +356,240 @@ class CallSession:
 
         # ── 6. Send audio to caller ───────────────────────────────────────────
         await self._send_audio(tts_audio)
+
+    # ── Transfer confirmation flow ─────────────────────────────────────────────
+
+    async def _enter_transfer_confirmation(
+        self,
+        transfer: TransferDirective,
+        spoken_reply: str,
+        language: str | None,
+    ) -> None:
+        """Ask the caller for verbal consent before executing a transfer."""
+        logger.info(
+            "Transfer to %s:%s requires confirmation; entering confirmation flow.",
+            transfer.target_kind,
+            transfer.target,
+        )
+        self._in_transfer_confirmation = True
+        self._pending_transfer = transfer
+        self._pending_transfer_spoken = spoken_reply
+
+        mode = _post_call_reopen_mode_for_transfer(transfer)
+        self._pending_post_call_reopen = True if mode == "auto" else False
+
+        if settings.transfer_confirmation_required:
+            self._awaiting_transfer_permission = True
+            self._awaiting_post_call_reopen_preference = False
+            question = _transfer_confirmation_prompt(transfer.target)
+        else:
+            # Prompt-only path for post-call reopen preference.
+            self._awaiting_transfer_permission = False
+            self._awaiting_post_call_reopen_preference = True
+            self._pending_post_call_reopen = None
+            question = _post_call_reopen_prompt(transfer.target)
+
+        try:
+            tts_audio = await tts.synthesize(question, language=language)
+            await self._send_audio(tts_audio)
+        except Exception:
+            logger.exception("Failed to synthesize transfer confirmation prompt")
+
+    async def _handle_transfer_confirmation_response(
+        self, response_text: str, response_result: stt.TranscriptionResult
+    ) -> None:
+        """Handle the caller's yes/no response to a pending transfer confirmation."""
+        logger.info("Transfer confirmation response: %s", response_text)
+
+        transfer = self._pending_transfer
+        if transfer is None:
+            logger.warning("Transfer confirmation active but no pending transfer state")
+            self._clear_pending_transfer_confirmation()
+            return
+
+        if self._awaiting_post_call_reopen_preference:
+            if self._is_affirmative_response(response_text):
+                self._pending_post_call_reopen = True
+                await self._execute_pending_transfer(response_result)
+                return
+            if self._is_negative_response(response_text):
+                self._pending_post_call_reopen = False
+                await self._execute_pending_transfer(response_result)
+                return
+
+            try:
+                tts_audio = await tts.synthesize(
+                    "Please say yes if you want me to return after the emergency line ends, "
+                    "or no if you do not.",
+                    language=response_result.language,
+                )
+                await self._send_audio(tts_audio)
+            except Exception:
+                logger.exception("Failed to synthesize reopen-preference clarification")
+            return
+
+        if self._is_affirmative_response(response_text):
+            mode = _post_call_reopen_mode_for_transfer(transfer)
+            needs_reopen_prompt = mode == "prompt"
+            if needs_reopen_prompt:
+                self._awaiting_transfer_permission = False
+                self._awaiting_post_call_reopen_preference = True
+                self._pending_post_call_reopen = None
+                try:
+                    tts_audio = await tts.synthesize(
+                        _post_call_reopen_prompt(transfer.target),
+                        language=response_result.language,
+                    )
+                    await self._send_audio(tts_audio)
+                except Exception:
+                    logger.exception("Failed to synthesize post-call reopen prompt")
+                return
+
+            await self._execute_pending_transfer(response_result)
+            return
+
+        if self._is_negative_response(response_text):
+            logger.info("Caller declined transfer; cancelling.")
+            self._clear_pending_transfer_confirmation()
+            cancellation = (
+                "Okay, I won't transfer you. I'm still here - please let me know how I can help."
+            )
+            try:
+                tts_audio = await tts.synthesize(cancellation, language=response_result.language)
+                await self._send_audio(tts_audio)
+            except Exception:
+                logger.exception("Failed to synthesize transfer cancellation message")
+            return
+
+        # Unclear – re-ask active question
+        clarification = (
+            "I didn't quite catch that. Please say yes to connect or no to stay."
+            if self._awaiting_transfer_permission
+            else "Please say yes or no."
+        )
+        try:
+            tts_audio = await tts.synthesize(clarification, language=response_result.language)
+            await self._send_audio(tts_audio)
+        except Exception:
+            logger.exception("Failed to synthesize transfer confirmation clarification")
+
+    async def _execute_pending_transfer(self, response_result: stt.TranscriptionResult) -> None:
+        transfer = self._pending_transfer
+        if transfer is None:
+            self._clear_pending_transfer_confirmation()
+            return
+
+        spoken = self._pending_transfer_spoken or _default_transfer_announcement(transfer.target)
+        post_call_reopen = bool(self._pending_post_call_reopen)
+        self._clear_pending_transfer_confirmation()
+
+        transferred = await self._transfer_call(
+            transfer,
+            spoken,
+            enable_post_call_reopen=post_call_reopen,
+        )
+        if not transferred:
+            fallback = (
+                f"I was unable to complete the transfer to {transfer.target} right now. "
+                "Please call directly if you are in immediate danger."
+            )
+            try:
+                tts_audio = await tts.synthesize(fallback, language=response_result.language)
+                await self._send_audio(tts_audio)
+            except Exception:
+                logger.exception("Failed to synthesize transfer-failed message")
+
+    def _clear_pending_transfer_confirmation(self) -> None:
+        self._in_transfer_confirmation = False
+        self._pending_transfer = None
+        self._pending_transfer_spoken = ""
+        self._awaiting_transfer_permission = False
+        self._awaiting_post_call_reopen_preference = False
+        self._pending_post_call_reopen = None
+
+    # ── End-call terminator flow ─────────────────────────────────────────────
+
+    async def _ask_are_we_done(self, language: str | None) -> None:
+        self._awaiting_done_confirmation = True
+        await self._speak_text("Are we done?", language)
+
+    async def _handle_done_confirmation_response(
+        self,
+        response_text: str,
+        response_result: stt.TranscriptionResult,
+    ) -> None:
+        if self._is_affirmative_response(response_text):
+            self._awaiting_done_confirmation = False
+            await self._start_terminator_sequence(response_result.language)
+            return
+
+        if self._is_negative_response(response_text):
+            self._awaiting_done_confirmation = False
+            await self._speak_text(
+                "Okay, we can keep going. What else can I help with?",
+                response_result.language,
+            )
+            return
+
+        await self._speak_text(
+            "Please say yes if you are ready to end, or no if you want to continue.",
+            response_result.language,
+        )
+
+    async def _start_terminator_sequence(self, language: str | None) -> None:
+        self._in_end_call_presence_flow = True
+        terminator = call_flow_phrases.random_terminator()
+        await self._speak_text(terminator, language)
+        self._cancel_end_call_presence_task()
+        self._end_call_presence_task = asyncio.create_task(
+            self._run_end_call_presence_loop(language)
+        )
+
+    def _cancel_end_call_presence_task(self) -> None:
+        if self._end_call_presence_task is not None:
+            self._end_call_presence_task.cancel()
+            self._end_call_presence_task = None
+
+    async def _run_end_call_presence_loop(self, language: str | None) -> None:
+        delay_s = max(0.0, float(settings.call_end_presence_delay_s))
+        rounds = max(0, int(settings.call_end_presence_rounds))
+        try:
+            for _ in range(rounds):
+                await asyncio.sleep(delay_s)
+                if not self._in_end_call_presence_flow:
+                    return
+                await self._speak_text("Are you still there?", language)
+
+            await asyncio.sleep(delay_s)
+            if self._in_end_call_presence_flow:
+                await self._hangup_call()
+        except asyncio.CancelledError:
+            return
+
+    async def _hangup_call(self) -> None:
+        self._in_end_call_presence_flow = False
+        self._cancel_end_call_presence_task()
+
+        if self._call_sid and settings.twilio_account_sid and settings.twilio_auth_token:
+            hangup_twiml = (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                "<Response><Hangup/></Response>"
+            )
+            try:
+                await asyncio.to_thread(twilio_transfer_call_update, self._call_sid, hangup_twiml)
+                return
+            except Exception:
+                logger.exception("Failed to end call via Twilio API")
+
+        with contextlib.suppress(Exception):
+            await self._ws.close()
+
+    async def _speak_text(self, text: str, language: str | None) -> None:
+        try:
+            audio = await tts.synthesize(text, language=language)
+            await self._send_audio(audio)
+        except Exception:
+            logger.exception("Failed to synthesize prompt: %s", text)
 
     # ── Low-confidence confirmation flow ──────────────────────────────────────
 
@@ -407,11 +715,78 @@ class CallSession:
         negative_words = {"no", "nope", "nah", "incorrect", "wrong", "uh-uh"}
         return any(word in text_lower for word in negative_words)
 
+    @staticmethod
+    def _is_end_call_intent(text: str) -> bool:
+        text_lower = text.lower().strip()
+        # Strong explicit closure phrases are sufficient on their own.
+        strong_intents = {
+            "we're done",
+            "we are done",
+            "that's all",
+            "that is all",
+            "that's everything",
+            "that is everything",
+            "nothing else",
+            "end the call",
+            "hang up",
+            "please end",
+            "disconnect the call",
+            "you can end the call",
+            "you can hang up",
+        }
+        if any(phrase in text_lower for phrase in strong_intents):
+            return True
+
+        # Softer intent phrases require an explicit call-ending action cue.
+        soft_intents = {
+            "i'm good",
+            "im good",
+            "all good",
+            "i got all the help i need",
+            "got all the help i need",
+            "no more questions",
+        }
+        action_cues = {
+            "end",
+            "hang up",
+            "disconnect",
+            "done",
+            "wrap up",
+            "finish",
+        }
+        if any(phrase in text_lower for phrase in soft_intents) and any(
+            cue in text_lower for cue in action_cues
+        ):
+            return True
+
+        return False
+
     def _finish_turn_processing(self) -> None:
         self._processing = False
         if self._pending_turns:
             next_audio = self._pending_turns.pop(0)
             asyncio.ensure_future(self._process_audio_turn(next_audio))
+
+    async def _interrupt_current_turn(self, reason: str) -> None:
+        task = self._active_turn_task
+        if task is None or task.done():
+            return
+
+        logger.info("Interrupting current turn: %s", reason)
+        task.cancel()
+        await self._clear_outbound_audio()
+
+    async def _clear_outbound_audio(self) -> None:
+        if not self._stream_sid:
+            return
+        await self._ws.send_text(
+            json.dumps(
+                {
+                    "event": "clear",
+                    "streamSid": self._stream_sid,
+                }
+            )
+        )
 
     async def _generate_with_optional_waiting_audio(self, language: str | None) -> str:
         if not settings.rag_enabled or not settings.rag_waiting_audio_enabled:
@@ -436,6 +811,15 @@ class CallSession:
             raise
         except Exception:
             logger.exception("Failed to play waiting audio during RAG lookup")
+
+    @staticmethod
+    def _chunk_has_speech(pcm16: bytes) -> bool:
+        if not pcm16:
+            return False
+        samples = np.frombuffer(pcm16, dtype=np.int16).astype(np.float32)
+        if samples.size == 0:
+            return False
+        return float(np.max(np.abs(samples))) > 500.0
 
     def _log_turn_drop(
         self,
@@ -488,7 +872,13 @@ class CallSession:
             )
         )
 
-    async def _transfer_call(self, transfer: TransferDirective, announcement: str) -> bool:
+    async def _transfer_call(
+        self,
+        transfer: TransferDirective,
+        announcement: str,
+        *,
+        enable_post_call_reopen: Optional[bool] = None,
+    ) -> bool:
         if not self._call_sid:
             logger.warning("Cannot transfer call without call SID")
             return False
@@ -498,11 +888,27 @@ class CallSession:
             return False
 
         try:
+            action_url: Optional[str] = None
+            should_reopen = (
+                _post_call_reopen_mode_for_transfer(transfer) == "auto"
+                if enable_post_call_reopen is None
+                else enable_post_call_reopen
+            )
+
+            if should_reopen:
+                # After the 911/988 operator hangs up, Twilio POSTs to this URL so
+                # Terris can re-engage the caller. Full 3-party monitoring during the
+                # emergency call is NOT possible via Media Streams - the bridge is
+                # direct. This only provides post-operator-hangup re-engagement.
+                scheme = "https"
+                action_url = f"{scheme}://{settings.public_host}/calls/transfer-completed"
+
             twiml = build_transfer_twiml(
                 transfer.target_kind,
                 transfer.target,
                 announcement,
                 metadata=transfer.metadata,
+                action_url=action_url,
             )
         except ValueError as exc:
             logger.warning("Rejected transfer directive: %s", exc)
@@ -587,12 +993,46 @@ def _default_transfer_announcement(target: str) -> str:
     return "I am connecting you now."
 
 
+def _transfer_confirmation_prompt(target: str) -> str:
+    """Return the verbal confirmation question Terris asks before a transfer."""
+    if target == "911":
+        return (
+            "I'd like to connect you to 911 emergency services right now. "
+            "Do I have your permission to do that?"
+        )
+    if target == "988":
+        return (
+            "I'd like to connect you to the 988 Suicide and Crisis Lifeline right now. "
+            "Do I have your permission to do that?"
+        )
+    return "I'd like to transfer your call now. Do I have your permission to do that?"
+
+
+def _post_call_reopen_prompt(target: str) -> str:
+    """Ask caller whether Terris should re-open after operator disconnects."""
+    if target == "911":
+        return (
+            "If the 911 operator ends the call first, should I come back on the line "
+            "to check on you? Please say yes or no."
+        )
+    if target == "988":
+        return (
+            "If the 988 counselor ends the call first, should I come back on the line "
+            "to check on you? Please say yes or no."
+        )
+    return (
+        "If the transferred line ends first, should I come back on the line "
+        "to check on you? Please say yes or no."
+    )
+
+
 def build_transfer_twiml(
     target_kind: Literal["number", "sip"],
     target: str,
     announcement: str,
     *,
     metadata: Optional[dict[str, str]] = None,
+    action_url: Optional[str] = None,
 ) -> str:
     normalized = _normalize_transfer_target(target_kind, target)
     metadata = metadata or {}
@@ -609,7 +1049,12 @@ def build_transfer_twiml(
 
     safe_announcement = escape(announcement.strip() or _default_transfer_announcement(target))
     destination = escape(sip_target if target_kind == "sip" else normalized)
-    dial_verb = f"<Dial><Sip>{destination}</Sip></Dial>" if target_kind == "sip" else f"<Dial>{destination}</Dial>"
+    action_attr = f' action="{escape(action_url)}"' if action_url else ""
+    dial_verb = (
+        f"<Dial{action_attr}><Sip>{destination}</Sip></Dial>"
+        if target_kind == "sip"
+        else f"<Dial{action_attr}>{destination}</Dial>"
+    )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
@@ -637,6 +1082,12 @@ def _validate_transfer_target(target: str, metadata: dict[str, str]) -> None:
     if target in {"911", "988"}:
         return
 
+    target_kind = "sip" if target.startswith("sip:") else "number"
+    if settings.transfer_services_enabled and not transfer_services.is_configured_target(
+        target_kind, target
+    ):
+        raise ValueError("custom transfer target is not listed in transfer services catalog")
+
     if not settings.transfer_allow_custom_targets:
         raise ValueError("custom transfer targets are disabled")
 
@@ -650,6 +1101,14 @@ def _validate_transfer_target(target: str, metadata: dict[str, str]) -> None:
     allowed_numbers = _csv_as_set(settings.transfer_allowed_numbers)
     if not allowed_numbers or target not in allowed_numbers:
         raise ValueError(f"number target is not allowlisted: {target}")
+
+
+def _post_call_reopen_mode_for_transfer(
+    transfer: TransferDirective,
+) -> Literal["off", "auto", "prompt"]:
+    if transfer.target in {"911", "988"}:
+        return get_transfer_post_call_reopen_mode()
+    return get_custom_transfer_post_call_reopen_mode()
 
 
 def _append_sip_headers(sip_uri: str, metadata: dict[str, str]) -> str:

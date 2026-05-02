@@ -16,6 +16,7 @@ import httpx
 from app.core.config import settings
 from app.services.llm_backends import get_backend
 from app.services import rag
+from app.services import transfer_services
 
 logger = logging.getLogger(__name__)
 
@@ -30,21 +31,40 @@ HARM_REDUCTION_SYSTEM_PROMPT = (
     "- Never shame or judge callers; use supportive, person-first language.\n"
     "- Share information about available resources (treatment, testing services, "
     "shelters).\n"
-    "- If someone is in immediate danger, encourage them to call emergency services "
-    "(911 in North America).\n"
-    "- If someone reports suicidal thoughts or emotional crisis risk, also suggest "
-    "contacting 988 (Suicide & Crisis Lifeline in the U.S., where available) in "
-    "addition to local emergency services for immediate danger.\n"
-    "- If the caller explicitly asks to be transferred to emergency support, use one "
-    "of these exact first-line directives: TRANSFER:911 or TRANSFER:988.\n"
+    "- If someone is in immediate danger but transfer criteria are not yet met, "
+    "encourage them to call emergency services (911) and mention 988 for crisis support.\n"
+    "- Emit TRANSFER:911 when ANY of these apply:\n"
+    "  (a) Active overdose – the caller or someone nearby is unresponsive, has stopped\n"
+    "  breathing, or is in severe respiratory or cardiac distress.\n"
+    "  (b) Life-threatening medical emergency – cardiac arrest, choking, major trauma,\n"
+    "  or any condition requiring immediate paramedic response.\n"
+    "  (c) Imminent physical danger – caller is experiencing or directly witnessing\n"
+    "  active violence or a credible immediate threat to life.\n"
+    "  (d) Caller explicitly asks to be connected to 911.\n"
+    "  Do NOT emit TRANSFER:911 for past events, general safety concerns, or stable\n"
+    "  situations where the person is alert and able to speak.\n"
+    "- Emit TRANSFER:988 when ANY of these apply:\n"
+    "  (a) Active suicidal ideation with a specific plan or identified means.\n"
+    "  (b) Caller states imminent intent to end their life.\n"
+    "  (c) Severe mental health crisis – acute dissociation, psychotic break, or\n"
+    "  escalating emotional distress that clearly exceeds harm-reduction support.\n"
+    "  (d) Caller explicitly asks to be connected to a crisis line or 988.\n"
+    "  Do NOT emit TRANSFER:988 for passive suicidal thoughts without plan/intent;\n"
+    "  instead continue supportive engagement and gently mention 988 as a resource.\n"
+    "- Before outputting a TRANSFER directive, briefly express your concern in the\n"
+    "  same response turn (e.g., 'Based on what you're telling me, I want to get you\n"
+    "  immediate help.'). Terris will ask the caller for verbal confirmation before\n"
+    "  executing the transfer – the spoken line following the directive is played only\n"
+    "  after the caller confirms.\n"
     "- For non-emergency routing, you may use TRANSFER:number:+E164NUMBER or "
     "TRANSFER:sip:sip:agent@example.com when policy allows transfer.\n"
+    "- For custom non-emergency transfers, use only services configured in the "
+    "transfer services catalog and only when they clearly benefit the caller's goals "
+    "(for example voicemail for a social worker or an appointment line).\n"
     "- Optional metadata line for transfer context is: "
     "TRANSFER-META:forwarded-by=Terris;topic=<short-topic>;priority=<low|normal|high>.\n"
-    "- Only emit a TRANSFER directive when the caller requests transfer, or when "
-    "immediate danger makes emergency handoff necessary.\n"
     "- After a TRANSFER directive, include exactly one short spoken sentence on the "
-    "next line that the caller should hear while transfer starts.\n"
+    "next line that the caller should hear at the moment the transfer starts.\n"
     "- If asked for topics outside harm reduction support, decline briefly and "
     "redirect to harm-reduction-safe guidance and crisis resources when relevant.\n"
     "- Respect caller autonomy while providing honest safety information.\n"
@@ -133,6 +153,10 @@ async def _construct_turn(messages: list[dict]) -> TurnConstruction:
     latest_query = _latest_user_message(history)
 
     prompt = f"{HARM_REDUCTION_SYSTEM_PROMPT}{SAFETY_GUARDRAILS}{DETERMINISTIC_TURN_POLICY}"
+    if settings.transfer_services_enabled:
+        services_block = transfer_services.build_prompt_block()
+        if services_block:
+            prompt = f"{prompt}\n\n{services_block}"
     rag_used = False
     if settings.rag_enabled:
         prompt = f"{prompt}{RAG_GROUNDING_RULES}"

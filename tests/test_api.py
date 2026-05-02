@@ -54,6 +54,16 @@ def test_inbound_call_twiml_structure(client: TestClient) -> None:
     assert "/calls/stream" in body
 
 
+def test_inbound_call_uses_randomized_opener(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.api.routes.calls.call_flow_phrases.random_opener",
+        lambda: "Custom opener test line.",
+    )
+    resp = client.post("/calls/inbound")
+    assert resp.status_code == 200
+    assert "Custom opener test line." in resp.text
+
+
 def test_transfer_harness_disabled_returns_403(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(settings, "transfer_harness_enabled", False)
     monkeypatch.setattr(settings, "debug", False)

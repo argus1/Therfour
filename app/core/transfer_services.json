@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "services": [
+    {
+      "id": "social_worker_voicemail",
+      "name": "On-call Social Worker Voicemail",
+      "description": "Use when the caller wants a callback for housing, benefits, or case-management support.",
+      "target_kind": "number",
+      "target": "+14155550100",
+      "keywords": ["social worker", "housing", "benefits", "case management", "voicemail"]
+    },
+    {
+      "id": "addiction_counselor_appointments",
+      "name": "Addiction Counselor Appointment Line",
+      "description": "Use when the caller asks to schedule or change a counseling or treatment appointment.",
+      "target_kind": "number",
+      "target": "+14155550101",
+      "keywords": ["appointment", "counselor", "treatment", "schedule", "reschedule"]
+    },
+    {
+      "id": "care_team_sip_queue",
+      "name": "Care Team SIP Queue",
+      "description": "Use when caller requests live handoff to an internal support queue.",
+      "target_kind": "sip",
+      "target": "sip:agent@example.com",
+      "keywords": ["live agent", "care team", "handoff", "transfer"]
+    }
+  ]
+}
