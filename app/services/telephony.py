@@ -146,6 +146,7 @@ class CallSession:
         self._audio_buffer: list[bytes] = []
         self._conversation: list[dict] = []
         self._canonical_turn_events: list[CanonicalTurn] = []
+        self._turn_sequence: int = 0
         self._pending_turns: list[np.ndarray] = []
         self._silence_timer: Optional[asyncio.TimerHandle] = None
         self._processing = False
@@ -300,6 +301,8 @@ class CallSession:
 
     async def _run_turn(self, audio: np.ndarray) -> None:
         turn_id = str(uuid4())
+        self._turn_sequence += 1
+        turn_idempotency_key = self._build_turn_idempotency_key()
         turn_input = CanonicalTurnInput(
             audio=CanonicalTurnInputAudio(
                 codec="pcm_f32le",
@@ -314,6 +317,7 @@ class CallSession:
                 input=turn_input,
                 status=CanonicalTurnStatus(state=CanonicalTurnState.OK),
             ),
+            idempotency_key=turn_idempotency_key,
         )
 
         # ── 1. Minimum duration gate ──────────────────────────────────────────
@@ -338,6 +342,7 @@ class CallSession:
                         retryable=False,
                     ),
                 ),
+                idempotency_key=turn_idempotency_key,
             )
             return
 
@@ -377,6 +382,7 @@ class CallSession:
                         retryable=True,
                     ),
                 ),
+                idempotency_key=turn_idempotency_key,
             )
             return
 
@@ -441,6 +447,7 @@ class CallSession:
                         retryable=True,
                     ),
                 ),
+                idempotency_key=turn_idempotency_key,
             )
             await self._enter_confirmation_flow(stt_result)
             return
@@ -534,6 +541,7 @@ class CallSession:
                         retryable=True,
                     ),
                 ),
+                idempotency_key=turn_idempotency_key,
             )
             return
 
@@ -599,7 +607,12 @@ class CallSession:
                 ),
                 status=CanonicalTurnStatus(state=CanonicalTurnState.OK),
             ),
+            idempotency_key=turn_idempotency_key,
         )
+
+    def _build_turn_idempotency_key(self) -> str:
+        session_hint = self._session_id or self._trace_id
+        return f"session:{session_hint}:turn:{self._turn_sequence}"
 
     def _emit_canonical_turn(
         self,

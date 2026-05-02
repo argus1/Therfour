@@ -524,11 +524,20 @@ async def test_run_turn_emits_canonical_turn_response(monkeypatch) -> None:
         for event in session._canonical_turn_events
         if event.envelope.message_type.value == "turn.response"
     ]
+    request_events = [
+        event
+        for event in session._canonical_turn_events
+        if event.envelope.message_type.value == "turn.request"
+    ]
     assert response_events
+    assert request_events
     response = response_events[-1]
+    request = request_events[-1]
     assert response.payload.status.state.value == "ok"
     assert response.payload.processing.stt is not None
     assert response.payload.processing.tts is not None
+    assert response.envelope.idempotency_key
+    assert request.envelope.idempotency_key == response.envelope.idempotency_key
 
 
 def test_waiting_audio_selects_multilingual_phrase_assets() -> None:
