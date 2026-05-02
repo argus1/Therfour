@@ -31,6 +31,7 @@ from app.models.schemas import (
     TransferHarnessResponse,
 )
 from app.services import call_flow_phrases
+from app.services.telephony_asterisk import build_asterisk_dialplan_stub
 from app.services.telephony import (
     CallSession,
     build_transfer_twiml,
@@ -164,6 +165,30 @@ async def media_stream(websocket: WebSocket) -> None:
         logger.exception("Unhandled error in media stream session")
     finally:
         logger.info("Media-stream connection closed")
+
+
+@router.get("/calls/asterisk/dialplan-stub")
+async def asterisk_dialplan_stub(request: Request) -> Response:
+    """Return an Asterisk/FreePBX dial-plan starter template.
+
+    This endpoint returns a non-production stub intended to accelerate
+    environment-specific ARI ExternalMedia setup.
+    """
+    host = request.headers.get("host") or settings.public_host
+    stub = build_asterisk_dialplan_stub(ws_host=host)
+    return Response(content=stub, media_type="text/plain")
+
+
+@router.websocket("/calls/asterisk/stream")
+async def asterisk_media_stream_stub(websocket: WebSocket) -> None:
+    """Asterisk ExternalMedia WebSocket stub.
+
+    Production ARI integration should consume/send raw binary frames here.
+    This stub accepts and closes so deployments can validate routing and TLS.
+    """
+    await websocket.accept()
+    logger.info("Asterisk media-stream stub connection accepted")
+    await websocket.close(code=1000)
 
 
 @router.post("/calls/transfer/harness", response_model=TransferHarnessResponse)

@@ -485,6 +485,52 @@ async def test_run_turn_routes_explanation_mode_with_rag_optional(monkeypatch) -
     assert captured["rag_allowed"] is True
 
 
+@pytest.mark.asyncio
+async def test_run_turn_emits_canonical_turn_response(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="hello there",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    async def _fake_generate(_conversation, strategy=None, rag_allowed=None):
+        return "Hi, how can I help?"
+
+    async def _fake_synthesize(_text, *, language=None):
+        return np.zeros(22050, dtype=np.float32)
+
+    async def _fake_send_audio(_samples):
+        return None
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.llm.generate", _fake_generate)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+
+    await session._run_turn(audio)
+
+    assert len(session._canonical_turn_events) >= 2
+    response_events = [
+        event
+        for event in session._canonical_turn_events
+        if event.envelope.message_type.value == "turn.response"
+    ]
+    assert response_events
+    response = response_events[-1]
+    assert response.payload.status.state.value == "ok"
+    assert response.payload.processing.stt is not None
+    assert response.payload.processing.tts is not None
+
+
 def test_waiting_audio_selects_multilingual_phrase_assets() -> None:
     assert waiting_audio._resolve_phrase_language("en") == "en-US"
     assert waiting_audio._resolve_phrase_language("zh") == "zh-CN"

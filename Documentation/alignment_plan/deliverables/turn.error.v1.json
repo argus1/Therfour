@@ -1,0 +1,54 @@
+{
+  "envelope": {
+    "schema_version": "1.0",
+    "message_type": "turn.error",
+    "trace_id": "6e414f26-bf87-4f84-b4ea-67b6cc23d343",
+    "turn_id": "32fd2603-e123-4cb8-90af-b53e630d7093",
+    "session_id": "CA1234567890abcdef",
+    "created_at": "2026-05-02T19:02:21Z",
+    "source": "telephony",
+    "idempotency_key": "twilio-stream-seq-9182"
+  },
+  "payload": {
+    "input": {
+      "audio": {
+        "codec": "pcm_f32le",
+        "sample_rate_hz": 16000,
+        "duration_ms": 1040
+      },
+      "text": {
+        "text": "I need immediate help"
+      },
+      "language": {
+        "code": "en",
+        "language_confidence": 0.97
+      }
+    },
+    "processing": {
+      "stt": {
+        "backend_name": "faster-whisper",
+        "transcript_text": "I need immediate help",
+        "transcript_confidence": 0.97,
+        "language_confidence": 0.97,
+        "transcript_quality_score": 0.94,
+        "fallback_used": false
+      },
+      "llm": {
+        "backend_name": "ollama",
+        "strategy": "rapport_building"
+      }
+    },
+    "output": {
+      "assistant_text": "",
+      "grounding": {},
+      "safety": {}
+    },
+    "status": {
+      "state": "failed",
+      "failure_reason": "provider_timeout",
+      "retryable": true,
+      "error_class": "timeout"
+    },
+    "parent_turn_id": "0b8d6eb9-ec9c-4d63-8448-68052ddf2eef"
+  }
+}

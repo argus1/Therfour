@@ -2,9 +2,232 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from enum import Enum
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class CanonicalTurnMessageType(str, Enum):
+    TURN_REQUEST = "turn.request"
+    TURN_RESPONSE = "turn.response"
+    TURN_ERROR = "turn.error"
+    TURN_EVENT = "turn.event"
+
+
+class CanonicalTurnState(str, Enum):
+    OK = "ok"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    DROPPED = "dropped"
+
+
+class CanonicalTurnErrorClass(str, Enum):
+    TIMEOUT = "timeout"
+    VALIDATION = "validation"
+    PROVIDER = "provider"
+    INTERNAL = "internal"
+    UPSTREAM_CANCEL = "upstream_cancel"
+
+
+class CanonicalTurnSource(str, Enum):
+    TELEPHONY = "telephony"
+    API = "api"
+    SWIFT_BACKEND = "swift-backend"
+    WORKER = "worker"
+
+
+class CanonicalTurnEnvelope(BaseModel):
+    """Transport envelope for canonical turn payloads."""
+
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: str = "1.0"
+    message_type: CanonicalTurnMessageType
+    trace_id: str
+    turn_id: str
+    session_id: str
+    created_at: datetime
+    source: CanonicalTurnSource = CanonicalTurnSource.TELEPHONY
+    idempotency_key: Optional[str] = None
+
+
+class CanonicalTurnInputAudio(BaseModel):
+    """Audio metadata for inbound turn input."""
+
+    model_config = ConfigDict(frozen=True)
+
+    codec: str
+    sample_rate_hz: int = Field(ge=1)
+    duration_ms: Optional[int] = Field(default=None, ge=0)
+
+
+class CanonicalTurnInputText(BaseModel):
+    """Text input fields for a turn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+
+
+class CanonicalTurnInputDTMF(BaseModel):
+    """DTMF input fields for a turn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    digits: str
+
+
+class CanonicalTurnInputLanguage(BaseModel):
+    """Language metadata for turn input."""
+
+    model_config = ConfigDict(frozen=True)
+
+    code: str
+    language_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+class CanonicalTurnInput(BaseModel):
+    """Inbound turn modalities."""
+
+    model_config = ConfigDict(frozen=True)
+
+    audio: Optional[CanonicalTurnInputAudio] = None
+    text: Optional[CanonicalTurnInputText] = None
+    dtmf: Optional[CanonicalTurnInputDTMF] = None
+    language: Optional[CanonicalTurnInputLanguage] = None
+
+
+class CanonicalTurnProcessingVAD(BaseModel):
+    """VAD processing fields for a turn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    backend_name: str = "silero"
+    vad_voiced_duration_ms: Optional[int] = Field(default=None, ge=0)
+
+
+class CanonicalTurnProcessingSTT(BaseModel):
+    """STT processing fields for a turn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    backend_name: str
+    transcript_text: str = ""
+    transcript_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    language_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    transcript_quality_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    fallback_used: bool = False
+    failure_reason: str = ""
+
+    @model_validator(mode="after")
+    def _validate_terminal_content(self) -> "CanonicalTurnProcessingSTT":
+        if not self.transcript_text and not self.failure_reason:
+            raise ValueError(
+                "processing.stt requires transcript_text or failure_reason"
+            )
+        return self
+
+
+class CanonicalTurnProcessingRAG(BaseModel):
+    """RAG processing fields for a turn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool
+    retrieval_relevance_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+class CanonicalTurnProcessingLLM(BaseModel):
+    """LLM processing fields for a turn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    backend_name: str
+    strategy: Optional[str] = None
+
+
+class CanonicalTurnProcessingTTS(BaseModel):
+    """TTS processing fields for a turn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    backend_name: str
+    voice_id: str
+    output_format: str
+    output_sample_rate_hz: Optional[int] = Field(default=None, ge=1)
+
+
+class CanonicalTurnProcessing(BaseModel):
+    """Normalized processing metadata for the turn pipeline."""
+
+    model_config = ConfigDict(frozen=True)
+
+    vad: Optional[CanonicalTurnProcessingVAD] = None
+    stt: Optional[CanonicalTurnProcessingSTT] = None
+    rag: Optional[CanonicalTurnProcessingRAG] = None
+    llm: Optional[CanonicalTurnProcessingLLM] = None
+    tts: Optional[CanonicalTurnProcessingTTS] = None
+
+
+class CanonicalTurnOutputAssistantAudio(BaseModel):
+    """Assistant audio output metadata."""
+
+    model_config = ConfigDict(frozen=True)
+
+    format: str
+    sample_rate_hz: int = Field(ge=1)
+    duration_ms: Optional[int] = Field(default=None, ge=0)
+
+
+class CanonicalTurnOutput(BaseModel):
+    """Normalized assistant output fields."""
+
+    model_config = ConfigDict(frozen=True)
+
+    assistant_text: str = ""
+    assistant_audio: Optional[CanonicalTurnOutputAssistantAudio] = None
+    grounding: dict[str, Any] = Field(default_factory=dict)
+    safety: dict[str, Any] = Field(default_factory=dict)
+
+
+class CanonicalTurnStatus(BaseModel):
+    """Lifecycle status for a canonical turn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    state: CanonicalTurnState
+    failure_reason: str = ""
+    retryable: bool = False
+    error_class: Optional[CanonicalTurnErrorClass] = None
+
+    @model_validator(mode="after")
+    def _validate_failure_fields(self) -> "CanonicalTurnStatus":
+        if self.state == CanonicalTurnState.FAILED and not self.failure_reason:
+            raise ValueError("failed state requires failure_reason")
+        return self
+
+
+class CanonicalTurnPayload(BaseModel):
+    """Semantic payload for one canonical turn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    input: CanonicalTurnInput = Field(default_factory=CanonicalTurnInput)
+    processing: CanonicalTurnProcessing = Field(default_factory=CanonicalTurnProcessing)
+    output: CanonicalTurnOutput = Field(default_factory=CanonicalTurnOutput)
+    status: CanonicalTurnStatus
+    parent_turn_id: Optional[str] = None
+
+
+class CanonicalTurn(BaseModel):
+    """Top-level canonical turn document."""
+
+    model_config = ConfigDict(frozen=True)
+
+    envelope: CanonicalTurnEnvelope
+    payload: CanonicalTurnPayload
 
 
 class VoiceServiceError(RuntimeError):

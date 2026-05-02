@@ -14,7 +14,9 @@ import contextlib
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from dataclasses import dataclass
+from uuid import uuid4
 from typing import Literal, Optional
 from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 from xml.sax.saxutils import escape
@@ -23,6 +25,27 @@ import numpy as np
 from scipy.signal import resample_poly
 
 from app.core.config import settings
+from app.models.schemas import (
+    CanonicalTurn,
+    CanonicalTurnEnvelope,
+    CanonicalTurnInput,
+    CanonicalTurnInputAudio,
+    CanonicalTurnInputLanguage,
+    CanonicalTurnInputText,
+    CanonicalTurnMessageType,
+    CanonicalTurnOutput,
+    CanonicalTurnOutputAssistantAudio,
+    CanonicalTurnPayload,
+    CanonicalTurnProcessing,
+    CanonicalTurnProcessingLLM,
+    CanonicalTurnProcessingRAG,
+    CanonicalTurnProcessingSTT,
+    CanonicalTurnProcessingTTS,
+    CanonicalTurnProcessingVAD,
+    CanonicalTurnSource,
+    CanonicalTurnState,
+    CanonicalTurnStatus,
+)
 from app.services import call_flow_phrases
 from app.services import llm, stt, tts
 from app.services import turn_strategy
@@ -118,8 +141,11 @@ class CallSession:
         self._ws = websocket
         self._stream_sid: Optional[str] = None
         self._call_sid: Optional[str] = None
+        self._trace_id: str = str(uuid4())
+        self._session_id: str = self._trace_id
         self._audio_buffer: list[bytes] = []
         self._conversation: list[dict] = []
+        self._canonical_turn_events: list[CanonicalTurn] = []
         self._pending_turns: list[np.ndarray] = []
         self._silence_timer: Optional[asyncio.TimerHandle] = None
         self._processing = False
@@ -170,6 +196,8 @@ class CallSession:
                 start = msg.get("start", {})
                 self._stream_sid = msg.get("streamSid") or start.get("streamSid")
                 self._call_sid = msg.get("callSid") or start.get("callSid")
+                if self._call_sid:
+                    self._session_id = self._call_sid
                 logger.info("Stream started – SID: %s", self._stream_sid)
             elif event == "media":
                 await self._on_media(msg["media"]["payload"])
@@ -271,10 +299,46 @@ class CallSession:
             self._finish_turn_processing()
 
     async def _run_turn(self, audio: np.ndarray) -> None:
+        turn_id = str(uuid4())
+        turn_input = CanonicalTurnInput(
+            audio=CanonicalTurnInputAudio(
+                codec="pcm_f32le",
+                sample_rate_hz=settings.audio_sample_rate_whisper,
+                duration_ms=round((len(audio) / settings.audio_sample_rate_whisper) * 1000),
+            )
+        )
+        self._emit_canonical_turn(
+            message_type=CanonicalTurnMessageType.TURN_REQUEST,
+            turn_id=turn_id,
+            payload=CanonicalTurnPayload(
+                input=turn_input,
+                status=CanonicalTurnStatus(state=CanonicalTurnState.OK),
+            ),
+        )
+
         # ── 1. Minimum duration gate ──────────────────────────────────────────
         min_samples = int(settings.min_audio_duration_s * settings.audio_sample_rate_whisper)
         if len(audio) < min_samples:
             self._log_turn_drop("too_short", audio=audio)
+            self._emit_canonical_turn(
+                message_type=CanonicalTurnMessageType.TURN_EVENT,
+                turn_id=turn_id,
+                payload=CanonicalTurnPayload(
+                    input=turn_input,
+                    processing=CanonicalTurnProcessing(
+                        vad=CanonicalTurnProcessingVAD(
+                            vad_voiced_duration_ms=round(
+                                (len(audio) / settings.audio_sample_rate_whisper) * 1000
+                            )
+                        )
+                    ),
+                    status=CanonicalTurnStatus(
+                        state=CanonicalTurnState.DROPPED,
+                        failure_reason="too_short",
+                        retryable=False,
+                    ),
+                ),
+            )
             return
 
         # ── 2. STT ────────────────────────────────────────────────────────────
@@ -290,6 +354,29 @@ class CallSession:
                 stt_result.failure_reason or "no_speech",
                 audio=audio,
                 stt_result=stt_result,
+            )
+            self._emit_canonical_turn(
+                message_type=CanonicalTurnMessageType.TURN_EVENT,
+                turn_id=turn_id,
+                payload=CanonicalTurnPayload(
+                    input=turn_input,
+                    processing=CanonicalTurnProcessing(
+                        stt=CanonicalTurnProcessingSTT(
+                            backend_name=stt_result.backend_name,
+                            transcript_text="",
+                            transcript_confidence=stt_result.confidence,
+                            language_confidence=stt_result.language_confidence,
+                            transcript_quality_score=stt_result.transcript_quality_score,
+                            fallback_used=stt_result.fallback_used,
+                            failure_reason=stt_result.failure_reason or "no_speech",
+                        )
+                    ),
+                    status=CanonicalTurnStatus(
+                        state=CanonicalTurnState.DROPPED,
+                        failure_reason=stt_result.failure_reason or "no_speech",
+                        retryable=True,
+                    ),
+                ),
             )
             return
 
@@ -325,6 +412,36 @@ class CallSession:
 
         # ── 3. Check for low confidence (before LLM) ──────────────────────────
         if LowConfidenceHandler.is_low_confidence(stt_result):
+            self._emit_canonical_turn(
+                message_type=CanonicalTurnMessageType.TURN_EVENT,
+                turn_id=turn_id,
+                payload=CanonicalTurnPayload(
+                    input=CanonicalTurnInput(
+                        audio=turn_input.audio,
+                        text=CanonicalTurnInputText(text=text),
+                        language=CanonicalTurnInputLanguage(
+                            code=stt_result.language,
+                            language_confidence=stt_result.language_confidence,
+                        ),
+                    ),
+                    processing=CanonicalTurnProcessing(
+                        stt=CanonicalTurnProcessingSTT(
+                            backend_name=stt_result.backend_name,
+                            transcript_text=text,
+                            transcript_confidence=stt_result.confidence,
+                            language_confidence=stt_result.language_confidence,
+                            transcript_quality_score=stt_result.transcript_quality_score,
+                            fallback_used=stt_result.fallback_used,
+                            failure_reason=stt_result.failure_reason,
+                        )
+                    ),
+                    status=CanonicalTurnStatus(
+                        state=CanonicalTurnState.PARTIAL,
+                        failure_reason="low_confidence_confirmation",
+                        retryable=True,
+                    ),
+                ),
+            )
             await self._enter_confirmation_flow(stt_result)
             return
 
@@ -383,6 +500,41 @@ class CallSession:
             tts_audio = await tts.synthesize(spoken_reply, language=stt_result.language)
         except Exception:
             logger.exception("Dropping turn: TTS synthesis failed")
+            self._emit_canonical_turn(
+                message_type=CanonicalTurnMessageType.TURN_ERROR,
+                turn_id=turn_id,
+                payload=CanonicalTurnPayload(
+                    input=CanonicalTurnInput(
+                        audio=turn_input.audio,
+                        text=CanonicalTurnInputText(text=text),
+                        language=CanonicalTurnInputLanguage(
+                            code=stt_result.language,
+                            language_confidence=stt_result.language_confidence,
+                        ),
+                    ),
+                    processing=CanonicalTurnProcessing(
+                        stt=CanonicalTurnProcessingSTT(
+                            backend_name=stt_result.backend_name,
+                            transcript_text=text,
+                            transcript_confidence=stt_result.confidence,
+                            language_confidence=stt_result.language_confidence,
+                            transcript_quality_score=stt_result.transcript_quality_score,
+                            fallback_used=stt_result.fallback_used,
+                            failure_reason=stt_result.failure_reason,
+                        ),
+                        llm=CanonicalTurnProcessingLLM(
+                            backend_name=settings.llm_provider,
+                            strategy=strategy.value,
+                        ),
+                    ),
+                    output=CanonicalTurnOutput(assistant_text=spoken_reply),
+                    status=CanonicalTurnStatus(
+                        state=CanonicalTurnState.PARTIAL,
+                        failure_reason="tts_failed",
+                        retryable=True,
+                    ),
+                ),
+            )
             return
 
         logger.info(
@@ -393,6 +545,85 @@ class CallSession:
 
         # ── 6. Send audio to caller ───────────────────────────────────────────
         await self._send_audio(tts_audio)
+
+        self._emit_canonical_turn(
+            message_type=CanonicalTurnMessageType.TURN_RESPONSE,
+            turn_id=turn_id,
+            payload=CanonicalTurnPayload(
+                input=CanonicalTurnInput(
+                    audio=turn_input.audio,
+                    text=CanonicalTurnInputText(text=text),
+                    language=CanonicalTurnInputLanguage(
+                        code=stt_result.language,
+                        language_confidence=stt_result.language_confidence,
+                    ),
+                ),
+                processing=CanonicalTurnProcessing(
+                    vad=CanonicalTurnProcessingVAD(
+                        vad_voiced_duration_ms=round(
+                            (len(audio) / settings.audio_sample_rate_whisper) * 1000
+                        )
+                    ),
+                    stt=CanonicalTurnProcessingSTT(
+                        backend_name=stt_result.backend_name,
+                        transcript_text=text,
+                        transcript_confidence=stt_result.confidence,
+                        language_confidence=stt_result.language_confidence,
+                        transcript_quality_score=stt_result.transcript_quality_score,
+                        fallback_used=stt_result.fallback_used,
+                        failure_reason=stt_result.failure_reason,
+                    ),
+                    rag=CanonicalTurnProcessingRAG(
+                        enabled=bool(rag_allowed and settings.rag_enabled),
+                    ),
+                    llm=CanonicalTurnProcessingLLM(
+                        backend_name=settings.llm_provider,
+                        strategy=strategy.value,
+                    ),
+                    tts=CanonicalTurnProcessingTTS(
+                        backend_name=settings.tts_backend,
+                        voice_id=settings.f5_tts_voice,
+                        output_format="mulaw",
+                        output_sample_rate_hz=settings.audio_sample_rate_twilio,
+                    ),
+                ),
+                output=CanonicalTurnOutput(
+                    assistant_text=spoken_reply,
+                    assistant_audio=CanonicalTurnOutputAssistantAudio(
+                        format="mulaw",
+                        sample_rate_hz=settings.audio_sample_rate_twilio,
+                        duration_ms=round(
+                            (len(tts_audio) / PIPER_SAMPLE_RATE) * 1000
+                        ),
+                    ),
+                ),
+                status=CanonicalTurnStatus(state=CanonicalTurnState.OK),
+            ),
+        )
+
+    def _emit_canonical_turn(
+        self,
+        *,
+        message_type: CanonicalTurnMessageType,
+        turn_id: str,
+        payload: CanonicalTurnPayload,
+        idempotency_key: Optional[str] = None,
+    ) -> None:
+        envelope = CanonicalTurnEnvelope(
+            message_type=message_type,
+            trace_id=self._trace_id,
+            turn_id=turn_id,
+            session_id=self._session_id,
+            created_at=datetime.now(timezone.utc),
+            source=CanonicalTurnSource.TELEPHONY,
+            idempotency_key=idempotency_key,
+        )
+        canonical_turn = CanonicalTurn(envelope=envelope, payload=payload)
+        self._canonical_turn_events.append(canonical_turn)
+        logger.info(
+            "canonical_turn=%s",
+            canonical_turn.model_dump_json(exclude_none=True),
+        )
 
     # ── Transfer confirmation flow ─────────────────────────────────────────────
 

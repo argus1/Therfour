@@ -11,6 +11,17 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.models.schemas import (
+    CanonicalTurn,
+    CanonicalTurnEnvelope,
+    CanonicalTurnErrorClass,
+    CanonicalTurnInput,
+    CanonicalTurnMessageType,
+    CanonicalTurnPayload,
+    CanonicalTurnProcessing,
+    CanonicalTurnProcessingSTT,
+    CanonicalTurnSource,
+    CanonicalTurnState,
+    CanonicalTurnStatus,
     ChatMessage,
     HealthResponse,
     LLMBackendCapabilities,
@@ -62,6 +73,54 @@ def test_inbound_call_uses_randomized_opener(client: TestClient, monkeypatch) ->
     resp = client.post("/calls/inbound")
     assert resp.status_code == 200
     assert "Custom opener test line." in resp.text
+
+
+def test_asterisk_dialplan_stub_returns_template(client: TestClient) -> None:
+    resp = client.get("/calls/asterisk/dialplan-stub")
+    assert resp.status_code == 200
+    assert "ExternalMedia(" in resp.text
+    assert "/calls/asterisk/stream" in resp.text
+
+
+def test_canonical_turn_requires_failed_reason() -> None:
+    with pytest.raises(ValidationError):
+        CanonicalTurnStatus(state=CanonicalTurnState.FAILED)
+
+
+def test_canonical_turn_requires_stt_terminal_content() -> None:
+    with pytest.raises(ValidationError):
+        CanonicalTurnProcessingSTT(backend_name="faster-whisper")
+
+
+def test_canonical_turn_accepts_valid_payload() -> None:
+    turn = CanonicalTurn(
+        envelope=CanonicalTurnEnvelope(
+            message_type=CanonicalTurnMessageType.TURN_RESPONSE,
+            trace_id="trace-1",
+            turn_id="turn-1",
+            session_id="session-1",
+            created_at="2026-05-02T00:00:00Z",
+            source=CanonicalTurnSource.TELEPHONY,
+        ),
+        payload=CanonicalTurnPayload(
+            input=CanonicalTurnInput(),
+            processing=CanonicalTurnProcessing(
+                stt=CanonicalTurnProcessingSTT(
+                    backend_name="faster-whisper",
+                    transcript_text="hello",
+                )
+            ),
+            status=CanonicalTurnStatus(
+                state=CanonicalTurnState.PARTIAL,
+                failure_reason="tts_failed",
+                retryable=True,
+                error_class=CanonicalTurnErrorClass.PROVIDER,
+            ),
+        ),
+    )
+    dumped = turn.model_dump(exclude_none=True)
+    assert dumped["envelope"]["message_type"] == "turn.response"
+    assert dumped["payload"]["status"]["state"] == "partial"
 
 
 def test_transfer_harness_disabled_returns_403(client: TestClient, monkeypatch) -> None:
