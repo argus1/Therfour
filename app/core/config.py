@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     # Public hostname used to construct the wss:// URL returned in TwiML.
     public_host: str = "localhost"
+    # Enables /calls/transfer/harness integration endpoint for transfer simulation.
+    transfer_harness_enabled: bool = False
+    # Allows non-emergency custom transfer targets from directives/harness.
+    transfer_allow_custom_targets: bool = False
+    # Comma-separated allowlist for custom PSTN transfer targets (E.164 only).
+    transfer_allowed_numbers: str = ""
+    # Comma-separated allowlist for SIP domains (e.g. help.example.com).
+    transfer_allowed_sip_domains: str = ""
+    # strict: reject metadata for PSTN targets; compat: keep metadata in logs.
+    transfer_metadata_mode: Literal["strict", "compat"] = "compat"
 
     # ── STT – faster-whisper ─────────────────────────────────────────────────
     whisper_model: str = "small"

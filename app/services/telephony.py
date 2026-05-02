@@ -12,7 +12,11 @@ import asyncio
 import base64
 import json
 import logging
-from typing import Optional
+import re
+from dataclasses import dataclass
+from typing import Literal, Optional
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
+from xml.sax.saxutils import escape
 
 import numpy as np
 from scipy.signal import resample_poly
@@ -24,6 +28,18 @@ from app.services.tts import PIPER_SAMPLE_RATE
 from app.services.vad import StreamingSpeechDetector, silero_vad_available
 
 logger = logging.getLogger(__name__)
+
+_TRANSFER_DIRECTIVE_PATTERN = re.compile(r"^TRANSFER:\s*(911|988)\s*$", re.IGNORECASE)
+_TRANSFER_V2_PATTERN = re.compile(r"^TRANSFER:\s*(number|sip)\s*:\s*(.+)$", re.IGNORECASE)
+_TRANSFER_META_PATTERN = re.compile(r"^TRANSFER-META:\s*(.+)$", re.IGNORECASE)
+_E164_PATTERN = re.compile(r"^\+[1-9]\d{6,14}$")
+
+
+@dataclass(frozen=True)
+class TransferDirective:
+    target_kind: Literal["number", "sip"]
+    target: str
+    metadata: dict[str, str]
 
 # ── μ-law codec ───────────────────────────────────────────────────────────────
 try:
@@ -70,6 +86,7 @@ class CallSession:
     def __init__(self, websocket) -> None:
         self._ws = websocket
         self._stream_sid: Optional[str] = None
+        self._call_sid: Optional[str] = None
         self._audio_buffer: list[bytes] = []
         self._conversation: list[dict] = []
         self._pending_turns: list[np.ndarray] = []
@@ -109,6 +126,7 @@ class CallSession:
             elif event == "start":
                 start = msg.get("start", {})
                 self._stream_sid = msg.get("streamSid") or start.get("streamSid")
+                self._call_sid = msg.get("callSid") or start.get("callSid")
                 logger.info("Stream started – SID: %s", self._stream_sid)
             elif event == "media":
                 await self._on_media(msg["media"]["payload"])
@@ -231,13 +249,25 @@ class CallSession:
         # ── 4. LLM ────────────────────────────────────────────────────────────
         self._conversation.append({"role": "user", "content": text})
         reply = await llm.generate(self._conversation)
-        self._conversation.append({"role": "assistant", "content": reply})
-        logger.info("LLM reply: %s", reply)
+        transfer, spoken_reply = parse_transfer_directive(reply)
+        self._conversation.append({"role": "assistant", "content": spoken_reply})
+        logger.info("LLM reply: %s", spoken_reply)
+
+        if transfer is not None:
+            transfer_message = spoken_reply or _default_transfer_announcement(transfer.target)
+            transferred = await self._transfer_call(transfer, transfer_message)
+            if transferred:
+                logger.info("Call transfer initiated to %s:%s", transfer.target_kind, transfer.target)
+                return
+            spoken_reply = (
+                f"I could not complete the transfer to {transfer.target} right now. "
+                "If you are in immediate danger, call emergency services now."
+            )
 
         # ── 5. TTS ────────────────────────────────────────────────────────────
         # The TTS service returns float32 PCM samples at PIPER_SAMPLE_RATE.
         try:
-            tts_audio = await tts.synthesize(reply, language=stt_result.language)
+            tts_audio = await tts.synthesize(spoken_reply, language=stt_result.language)
         except Exception:
             logger.exception("Dropping turn: TTS synthesis failed")
             return
@@ -292,12 +322,28 @@ class CallSession:
             # Add the original (confirmed) text to conversation and process with RAG
             self._conversation.append({"role": "user", "content": self._pending_low_confidence_text})
             reply = await llm.generate(self._conversation)
-            self._conversation.append({"role": "assistant", "content": reply})
-            logger.info("LLM reply (after confirmation): %s", reply)
+            transfer, spoken_reply = parse_transfer_directive(reply)
+            self._conversation.append({"role": "assistant", "content": spoken_reply})
+            logger.info("LLM reply (after confirmation): %s", spoken_reply)
+
+            if transfer is not None:
+                transfer_message = spoken_reply or _default_transfer_announcement(transfer.target)
+                transferred = await self._transfer_call(transfer, transfer_message)
+                if transferred:
+                    logger.info(
+                        "Call transfer initiated after confirmation to %s:%s",
+                        transfer.target_kind,
+                        transfer.target,
+                    )
+                    return
+                spoken_reply = (
+                    f"I could not complete the transfer to {transfer.target} right now. "
+                    "If you are in immediate danger, call emergency services now."
+                )
             
             # Synthesize and send reply
             try:
-                tts_audio = await tts.synthesize(reply, language=response_result.language)
+                tts_audio = await tts.synthesize(spoken_reply, language=response_result.language)
                 await self._send_audio(tts_audio)
             except Exception:
                 logger.exception("Failed to synthesize LLM reply after confirmation")
@@ -415,3 +461,209 @@ class CallSession:
                 }
             )
         )
+
+    async def _transfer_call(self, transfer: TransferDirective, announcement: str) -> bool:
+        if not self._call_sid:
+            logger.warning("Cannot transfer call without call SID")
+            return False
+
+        if not settings.twilio_account_sid or not settings.twilio_auth_token:
+            logger.warning("Twilio credentials missing; cannot transfer call")
+            return False
+
+        try:
+            twiml = build_transfer_twiml(
+                transfer.target_kind,
+                transfer.target,
+                announcement,
+                metadata=transfer.metadata,
+            )
+        except ValueError as exc:
+            logger.warning("Rejected transfer directive: %s", exc)
+            return False
+
+        try:
+            await asyncio.to_thread(twilio_transfer_call_update, self._call_sid, twiml)
+            return True
+        except Exception:
+            logger.exception("Failed to transfer call to %s", transfer.target)
+            return False
+
+
+def parse_transfer_directive(reply: str) -> tuple[Optional[TransferDirective], str]:
+    """Extract optional transfer directive from LLM output.
+
+    The accepted directive format is a dedicated first line:
+      TRANSFER:911
+      TRANSFER:988
+      TRANSFER:number:+14155551212
+      TRANSFER:sip:sip:agent@example.com
+    Optional second line:
+      TRANSFER-META:forwarded-by=Terris;topic=overdose;priority=high
+    """
+    stripped = reply.strip()
+    if not stripped:
+        return None, ""
+
+    lines = stripped.splitlines()
+    first_line = lines[0].strip()
+    match = _TRANSFER_DIRECTIVE_PATTERN.match(first_line.strip())
+    if match:
+        target = match.group(1)
+        spoken_reply = "\n".join(lines[1:]).strip()
+        return TransferDirective(target_kind="number", target=target, metadata={}), spoken_reply
+
+    v2 = _TRANSFER_V2_PATTERN.match(first_line)
+    if not v2:
+        return None, stripped
+
+    target_kind = v2.group(1).lower()
+    target = v2.group(2).strip()
+    metadata: dict[str, str] = {}
+
+    spoken_start_index = 1
+    if len(lines) > 1:
+        metadata_match = _TRANSFER_META_PATTERN.match(lines[1].strip())
+        if metadata_match:
+            metadata = _parse_transfer_metadata(metadata_match.group(1))
+            spoken_start_index = 2
+
+    spoken_reply = "\n".join(lines[spoken_start_index:]).strip()
+    return (
+        TransferDirective(
+            target_kind="sip" if target_kind == "sip" else "number",
+            target=target,
+            metadata=metadata,
+        ),
+        spoken_reply,
+    )
+
+
+def _parse_transfer_metadata(raw: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for chunk in raw.split(";"):
+        item = chunk.strip()
+        if not item or "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        normalized_key = key.strip().lower()
+        normalized_value = value.strip()
+        if normalized_key in {"forwarded-by", "topic", "priority"} and normalized_value:
+            parsed[normalized_key] = normalized_value
+    return parsed
+
+
+def _default_transfer_announcement(target: str) -> str:
+    if target == "911":
+        return "I am connecting you to 911 now."
+    if target == "988":
+        return "I am connecting you to 988 now."
+    return "I am connecting you now."
+
+
+def build_transfer_twiml(
+    target_kind: Literal["number", "sip"],
+    target: str,
+    announcement: str,
+    *,
+    metadata: Optional[dict[str, str]] = None,
+) -> str:
+    normalized = _normalize_transfer_target(target_kind, target)
+    metadata = metadata or {}
+    _validate_transfer_target(normalized, metadata)
+
+    sip_target = normalized
+    if target_kind == "sip" and metadata:
+        sip_target = _append_sip_headers(normalized, metadata)
+
+    if target_kind == "number" and metadata:
+        if settings.transfer_metadata_mode == "strict":
+            raise ValueError("metadata is not supported for number transfers in strict mode")
+        logger.info("Compatibility mode: PSTN transfer metadata retained in logs only: %s", metadata)
+
+    safe_announcement = escape(announcement.strip() or _default_transfer_announcement(target))
+    destination = escape(sip_target if target_kind == "sip" else normalized)
+    dial_verb = f"<Dial><Sip>{destination}</Sip></Dial>" if target_kind == "sip" else f"<Dial>{destination}</Dial>"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<Response>"
+        f"<Say>{safe_announcement}</Say>"
+        f"{dial_verb}"
+        "</Response>"
+    )
+
+
+def _normalize_transfer_target(target_kind: Literal["number", "sip"], target: str) -> str:
+    trimmed = target.strip()
+    if target_kind == "number":
+        if trimmed in {"911", "988"}:
+            return trimmed
+        if not _E164_PATTERN.match(trimmed):
+            raise ValueError("number target must be 911, 988, or E.164")
+        return trimmed
+
+    if not trimmed.lower().startswith("sip:"):
+        trimmed = f"sip:{trimmed}"
+    return trimmed
+
+
+def _validate_transfer_target(target: str, metadata: dict[str, str]) -> None:
+    if target in {"911", "988"}:
+        return
+
+    if not settings.transfer_allow_custom_targets:
+        raise ValueError("custom transfer targets are disabled")
+
+    if target.startswith("sip:"):
+        domain = _extract_sip_domain(target)
+        allowed_domains = _csv_as_set(settings.transfer_allowed_sip_domains)
+        if not allowed_domains or domain not in allowed_domains:
+            raise ValueError(f"sip target domain is not allowlisted: {domain}")
+        return
+
+    allowed_numbers = _csv_as_set(settings.transfer_allowed_numbers)
+    if not allowed_numbers or target not in allowed_numbers:
+        raise ValueError(f"number target is not allowlisted: {target}")
+
+
+def _append_sip_headers(sip_uri: str, metadata: dict[str, str]) -> str:
+    parsed = urlparse(sip_uri)
+    existing = dict(parse_qsl(parsed.query, keep_blank_values=False))
+
+    mapping = {
+        "forwarded-by": "x-forwarded-by",
+        "topic": "x-topic",
+        "priority": "x-priority",
+    }
+    for key, value in metadata.items():
+        header_name = mapping.get(key)
+        if not header_name:
+            continue
+        existing[header_name] = value
+
+    query = urlencode(existing, doseq=False, quote_via=quote, safe="")
+    return urlunparse(parsed._replace(query=query))
+
+
+def _csv_as_set(value: str) -> set[str]:
+    return {item.strip() for item in value.split(",") if item.strip()}
+
+
+def _extract_sip_domain(sip_uri: str) -> str:
+    body = sip_uri[4:] if sip_uri.lower().startswith("sip:") else sip_uri
+    host_part = body.split("?", 1)[0]
+    host_part = host_part.split(";", 1)[0]
+    if "@" in host_part:
+        host_part = host_part.split("@", 1)[1]
+    if ":" in host_part:
+        host_part = host_part.split(":", 1)[0]
+    if not host_part:
+        raise ValueError("invalid sip target")
+    return host_part.lower()
+
+
+def twilio_transfer_call_update(call_sid: str, twiml: str) -> None:
+    from twilio.rest import Client
+
+    client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
+    client.calls(call_sid).update(twiml=twiml)

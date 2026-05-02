@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal, Optional
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -122,6 +124,33 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     services: dict[str, str]
+
+
+class TransferHarnessRequest(BaseModel):
+    """Input payload for transfer integration harness endpoint."""
+
+    model_config = ConfigDict(frozen=True)
+
+    target_kind: Literal["number", "sip"] = "number"
+    target: str
+    forwarded_by: str = ""
+    topic: str = ""
+    priority: str = ""
+    announcement: str = ""
+    execute_live_update: bool = False
+    call_sid: Optional[str] = None
+
+
+class TransferHarnessResponse(BaseModel):
+    """Response payload for transfer integration harness endpoint."""
+
+    model_config = ConfigDict(frozen=True)
+
+    target_kind: Literal["number", "sip"]
+    target: str
+    twiml: str
+    executed_live_update: bool
+    call_sid: str = ""
 
 
 def make_health_response(app_version: str, whisper_model: str, ollama_model: str) -> HealthResponse:

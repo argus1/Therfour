@@ -10,11 +10,14 @@ import pytest
 
 from app.services.telephony import (
     CallSession,
+    build_transfer_twiml,
     downsample,
     mulaw_to_pcm16,
+    parse_transfer_directive,
     pcm16_to_mulaw,
     upsample,
 )
+from app.core.config import settings
 from app.models.schemas import TranscriptionResult
 from app.services.vad import StreamingSpeechDetector
 
@@ -248,3 +251,103 @@ async def test_run_turn_sticks_to_sherpa_after_first_sherpa_result(monkeypatch) 
     await session._run_turn(audio)
 
     assert preferred_backends == [None, "sherpa"]
+
+
+def test_parse_transfer_directive_extracts_target_and_spoken_reply() -> None:
+    directive, spoken = parse_transfer_directive(
+        "TRANSFER:911\nI am connecting you to emergency services now."
+    )
+    assert directive is not None
+    assert directive.target_kind == "number"
+    assert directive.target == "911"
+    assert spoken == "I am connecting you to emergency services now."
+
+
+def test_parse_transfer_directive_v2_extracts_metadata() -> None:
+    directive, spoken = parse_transfer_directive(
+        "TRANSFER:sip:sip:agent@example.com\n"
+        "TRANSFER-META:forwarded-by=Terris;topic=overdose;priority=high\n"
+        "Connecting now."
+    )
+    assert directive is not None
+    assert directive.target_kind == "sip"
+    assert directive.target == "sip:agent@example.com"
+    assert directive.metadata == {
+        "forwarded-by": "Terris",
+        "topic": "overdose",
+        "priority": "high",
+    }
+    assert spoken == "Connecting now."
+
+
+def test_parse_transfer_directive_returns_plain_reply_when_no_directive() -> None:
+    directive, spoken = parse_transfer_directive("Let us focus on your immediate safety.")
+    assert directive is None
+    assert spoken == "Let us focus on your immediate safety."
+
+
+def test_build_transfer_twiml_adds_sip_headers(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "transfer_allow_custom_targets", True)
+    monkeypatch.setattr(settings, "transfer_allowed_sip_domains", "example.com")
+
+    twiml = build_transfer_twiml(
+        "sip",
+        "sip:agent@example.com",
+        "Connecting now.",
+        metadata={"forwarded-by": "Terris", "topic": "support", "priority": "normal"},
+    )
+
+    assert "<Sip>sip:agent@example.com?" in twiml
+    assert "x-forwarded-by=Terris" in twiml
+    assert "x-topic=support" in twiml
+    assert "x-priority=normal" in twiml
+
+
+def test_build_transfer_twiml_rejects_number_metadata_in_strict_mode(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "transfer_metadata_mode", "strict")
+    with pytest.raises(ValueError):
+        build_transfer_twiml(
+            "number",
+            "988",
+            "Connecting now.",
+            metadata={"forwarded-by": "Terris"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_turn_executes_transfer_when_directive_present(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="Please transfer me to 988",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    async def _fake_generate(_conversation):
+        return "TRANSFER:988\nConnecting you to 988 now."
+
+    transfer_calls: list[tuple[str, str, str]] = []
+
+    async def _fake_transfer(transfer, announcement: str) -> bool:
+        transfer_calls.append((transfer.target_kind, transfer.target, announcement))
+        return True
+
+    async def _unexpected_tts(_text, *, language=None):
+        raise AssertionError("TTS should not run when transfer succeeds")
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.llm.generate", _fake_generate)
+    monkeypatch.setattr(session, "_transfer_call", _fake_transfer)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _unexpected_tts)
+
+    await session._run_turn(audio)
+
+    assert transfer_calls == [("number", "988", "Connecting you to 988 now.")]

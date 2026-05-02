@@ -183,6 +183,71 @@ swift test
 All settings can be overridden via environment variables or a `.env` file.
 See `.env.example` for the full list with descriptions.
 
+### Transfer routing (number + SIP)
+
+The call transfer flow supports emergency handoff (`911`, `988`) plus optional
+custom transfer targets.
+
+- Number transfers: dial PSTN/E.164 targets.
+- SIP transfers: dial SIP endpoints and attach metadata as SIP headers.
+- Compatibility mode: for PSTN targets, keep metadata in app logs but do not
+  send SIP headers.
+
+Suggested `.env` settings:
+
+```env
+TRANSFER_HARNESS_ENABLED=true
+TRANSFER_ALLOW_CUSTOM_TARGETS=true
+TRANSFER_ALLOWED_NUMBERS=+14155550100,+14155550101
+TRANSFER_ALLOWED_SIP_DOMAINS=example.com,care.example.org
+TRANSFER_METADATA_MODE=compat
+```
+
+Transfer config behavior:
+
+- `TRANSFER_HARNESS_ENABLED`: enables `POST /calls/transfer/harness`.
+- `TRANSFER_ALLOW_CUSTOM_TARGETS`: allows non-`911`/`988` targets.
+- `TRANSFER_ALLOWED_NUMBERS`: allowlist for custom PSTN numbers.
+- `TRANSFER_ALLOWED_SIP_DOMAINS`: allowlist for SIP destination domains.
+- `TRANSFER_METADATA_MODE`:
+  - `compat`: metadata on PSTN transfers is accepted and logged.
+  - `strict`: metadata on PSTN transfers is rejected.
+
+Harness examples:
+
+```bash
+# PSTN transfer (dry run)
+curl -X POST http://localhost:8000/calls/transfer/harness \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "target_kind": "number",
+    "target": "+14155550100",
+    "forwarded_by": "Terris",
+    "topic": "overdose-risk",
+    "priority": "high",
+    "execute_live_update": false
+  }'
+
+# SIP transfer with custom headers (dry run)
+curl -X POST http://localhost:8000/calls/transfer/harness \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "target_kind": "sip",
+    "target": "sip:agent@example.com",
+    "forwarded_by": "Terris",
+    "topic": "withdrawal-support",
+    "priority": "normal",
+    "execute_live_update": false
+  }'
+```
+
+LLM transfer directives:
+
+- Legacy: `TRANSFER:911` or `TRANSFER:988`
+- Extended: `TRANSFER:number:+14155550100` or `TRANSFER:sip:sip:agent@example.com`
+- Optional metadata line:
+  `TRANSFER-META:forwarded-by=Terris;topic=overdose-risk;priority=high`
+
 ## Model artifact storage
 
 Therfour now follows the same broad pattern used in HealthCoacher for large local
@@ -214,23 +279,28 @@ git lfs install
 git add .gitattributes models/llm/<your-model>.gguf
 ```
 
-| Variable                     | Default                                 | Description                                |
-| ---------------------------- | --------------------------------------- | ------------------------------------------ |
-| `WHISPER_MODEL`              | `small`                                 | faster-whisper model size                  |
-| `WHISPER_LANGUAGE`           | _(auto-detect)_                         | Pin transcription language                 |
-| `WHISPER_FALLBACK_ENABLED`   | `true`                                  | Enables secondary Whisper decode attempt   |
-| `WHISPER_PRIMARY_BEAM_SIZE`  | `5`                                     | Beam size for primary decode attempt       |
-| `WHISPER_FALLBACK_BEAM_SIZE` | `1`                                     | Beam size for fallback decode attempt      |
-| `STT_MIN_TEXT_CHARACTERS`    | `2`                                     | Minimum transcript length before accept    |
-| `STT_MIN_QUALITY_SCORE`      | `0.25`                                  | Minimum heuristic quality score            |
-| `VAD_ENABLED`                | `true`                                  | Enables Silero streaming VAD segmentation  |
-| `VAD_THRESHOLD`              | `0.5`                                   | Speech probability threshold               |
-| `VAD_MIN_SILENCE_MS`         | `300`                                   | Silence duration required to close turn    |
-| `VAD_SPEECH_PAD_MS`          | `96`                                    | Speech padding around detected boundaries  |
-| `VAD_PREROLL_MS`             | `96`                                    | Audio preroll retained before speech start |
-| `PIPER_BINARY`               | `piper`                                 | Path to the Piper executable               |
-| `PIPER_MODEL_PATH`           | `models/piper/en_US-lessac-medium.onnx` | Piper voice model                          |
-| `OLLAMA_MODEL`               | `llama3.2:3b`                           | Ollama model tag                           |
-| `OLLAMA_BASE_URL`            | `http://localhost:11434`                | Ollama API base URL                        |
-| `SILENCE_TIMEOUT_S`          | `1.5`                                   | Seconds of silence before turn processing  |
-| `PUBLIC_HOST`                | `localhost`                             | Hostname used in the TwiML `<Stream>` URL  |
+| Variable                        | Default                                 | Description                                     |
+| ------------------------------- | --------------------------------------- | ----------------------------------------------- |
+| `WHISPER_MODEL`                 | `small`                                 | faster-whisper model size                       |
+| `WHISPER_LANGUAGE`              | _(auto-detect)_                         | Pin transcription language                      |
+| `WHISPER_FALLBACK_ENABLED`      | `true`                                  | Enables secondary Whisper decode attempt        |
+| `WHISPER_PRIMARY_BEAM_SIZE`     | `5`                                     | Beam size for primary decode attempt            |
+| `WHISPER_FALLBACK_BEAM_SIZE`    | `1`                                     | Beam size for fallback decode attempt           |
+| `STT_MIN_TEXT_CHARACTERS`       | `2`                                     | Minimum transcript length before accept         |
+| `STT_MIN_QUALITY_SCORE`         | `0.25`                                  | Minimum heuristic quality score                 |
+| `VAD_ENABLED`                   | `true`                                  | Enables Silero streaming VAD segmentation       |
+| `VAD_THRESHOLD`                 | `0.5`                                   | Speech probability threshold                    |
+| `VAD_MIN_SILENCE_MS`            | `300`                                   | Silence duration required to close turn         |
+| `VAD_SPEECH_PAD_MS`             | `96`                                    | Speech padding around detected boundaries       |
+| `VAD_PREROLL_MS`                | `96`                                    | Audio preroll retained before speech start      |
+| `PIPER_BINARY`                  | `piper`                                 | Path to the Piper executable                    |
+| `PIPER_MODEL_PATH`              | `models/piper/en_US-lessac-medium.onnx` | Piper voice model                               |
+| `OLLAMA_MODEL`                  | `llama3.2:3b`                           | Ollama model tag                                |
+| `OLLAMA_BASE_URL`               | `http://localhost:11434`                | Ollama API base URL                             |
+| `SILENCE_TIMEOUT_S`             | `1.5`                                   | Seconds of silence before turn processing       |
+| `PUBLIC_HOST`                   | `localhost`                             | Hostname used in the TwiML `<Stream>` URL       |
+| `TRANSFER_HARNESS_ENABLED`      | `false`                                 | Enables transfer harness endpoint               |
+| `TRANSFER_ALLOW_CUSTOM_TARGETS` | `false`                                 | Allows custom transfer targets beyond 911/988   |
+| `TRANSFER_ALLOWED_NUMBERS`      | _(empty)_                               | Comma-separated PSTN/E.164 transfer allowlist   |
+| `TRANSFER_ALLOWED_SIP_DOMAINS`  | _(empty)_                               | Comma-separated SIP domain allowlist            |
+| `TRANSFER_METADATA_MODE`        | `compat`                                | PSTN metadata handling mode (`compat`/`strict`) |

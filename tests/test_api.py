@@ -15,6 +15,7 @@ from app.models.schemas import (
     TranscriptionResult,
     TurnProcessingResult,
 )
+from app.core.config import settings
 
 
 def test_health_returns_ok(client: TestClient) -> None:
@@ -46,6 +47,110 @@ def test_inbound_call_twiml_structure(client: TestClient) -> None:
     assert "<Response>" in body
     assert "<Stream" in body
     assert "/calls/stream" in body
+
+
+def test_transfer_harness_disabled_returns_403(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "transfer_harness_enabled", False)
+    monkeypatch.setattr(settings, "debug", False)
+
+    resp = client.post(
+        "/calls/transfer/harness",
+        json={"target_kind": "number", "target": "988"},
+    )
+
+    assert resp.status_code == 403
+    assert "disabled" in resp.json()["detail"].lower()
+
+
+def test_transfer_harness_dry_run_returns_twiml(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "transfer_harness_enabled", True)
+
+    resp = client.post(
+        "/calls/transfer/harness",
+        json={
+            "target_kind": "number",
+            "target": "988",
+            "announcement": "Connecting you to 988 now.",
+            "execute_live_update": False,
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["target"] == "988"
+    assert body["target_kind"] == "number"
+    assert body["executed_live_update"] is False
+    assert "<Dial>988</Dial>" in body["twiml"]
+
+
+def test_transfer_harness_live_update_calls_twilio(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "transfer_harness_enabled", True)
+
+    called: list[tuple[str, str]] = []
+
+    def _fake_update(call_sid: str, twiml: str) -> None:
+        called.append((call_sid, twiml))
+
+    monkeypatch.setattr("app.api.routes.calls.twilio_transfer_call_update", _fake_update)
+
+    resp = client.post(
+        "/calls/transfer/harness",
+        json={
+            "target_kind": "number",
+            "target": "911",
+            "announcement": "I am connecting you to emergency services now.",
+            "execute_live_update": True,
+            "call_sid": "CA123",
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["executed_live_update"] is True
+    assert body["call_sid"] == "CA123"
+    assert called and called[0][0] == "CA123"
+    assert "<Dial>911</Dial>" in called[0][1]
+
+
+def test_transfer_harness_sip_adds_custom_headers(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "transfer_harness_enabled", True)
+    monkeypatch.setattr(settings, "transfer_allow_custom_targets", True)
+    monkeypatch.setattr(settings, "transfer_allowed_sip_domains", "example.com")
+
+    resp = client.post(
+        "/calls/transfer/harness",
+        json={
+            "target_kind": "sip",
+            "target": "sip:agent@example.com",
+            "forwarded_by": "Terris",
+            "topic": "overdose",
+            "priority": "high",
+        },
+    )
+
+    assert resp.status_code == 200
+    twiml = resp.json()["twiml"]
+    assert "<Sip>sip:agent@example.com?" in twiml
+    assert "x-forwarded-by=Terris" in twiml
+    assert "x-topic=overdose" in twiml
+    assert "x-priority=high" in twiml
+
+
+def test_transfer_harness_number_metadata_strict_mode_rejected(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "transfer_harness_enabled", True)
+    monkeypatch.setattr(settings, "transfer_metadata_mode", "strict")
+
+    resp = client.post(
+        "/calls/transfer/harness",
+        json={
+            "target_kind": "number",
+            "target": "988",
+            "forwarded_by": "Terris",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert "strict mode" in resp.json()["detail"]
 
 
 # Contract-focused tests for data models
