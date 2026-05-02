@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import re
@@ -23,6 +24,7 @@ from scipy.signal import resample_poly
 
 from app.core.config import settings
 from app.services import llm, stt, tts
+from app.services import waiting_audio
 from app.services.stt_confidence import LowConfidenceHandler
 from app.services.tts import PIPER_SAMPLE_RATE
 from app.services.vad import StreamingSpeechDetector, silero_vad_available
@@ -248,7 +250,7 @@ class CallSession:
 
         # ── 4. LLM ────────────────────────────────────────────────────────────
         self._conversation.append({"role": "user", "content": text})
-        reply = await llm.generate(self._conversation)
+        reply = await self._generate_with_optional_waiting_audio(stt_result.language)
         transfer, spoken_reply = parse_transfer_directive(reply)
         self._conversation.append({"role": "assistant", "content": spoken_reply})
         logger.info("LLM reply: %s", spoken_reply)
@@ -321,7 +323,7 @@ class CallSession:
             
             # Add the original (confirmed) text to conversation and process with RAG
             self._conversation.append({"role": "user", "content": self._pending_low_confidence_text})
-            reply = await llm.generate(self._conversation)
+            reply = await self._generate_with_optional_waiting_audio(response_result.language)
             transfer, spoken_reply = parse_transfer_directive(reply)
             self._conversation.append({"role": "assistant", "content": spoken_reply})
             logger.info("LLM reply (after confirmation): %s", spoken_reply)
@@ -410,6 +412,30 @@ class CallSession:
         if self._pending_turns:
             next_audio = self._pending_turns.pop(0)
             asyncio.ensure_future(self._process_audio_turn(next_audio))
+
+    async def _generate_with_optional_waiting_audio(self, language: str | None) -> str:
+        if not settings.rag_enabled or not settings.rag_waiting_audio_enabled:
+            return await llm.generate(self._conversation)
+
+        waiting_task = asyncio.create_task(self._play_waiting_audio(language))
+        try:
+            return await llm.generate(self._conversation)
+        finally:
+            if not waiting_task.done():
+                waiting_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await waiting_task
+
+    async def _play_waiting_audio(self, language: str | None) -> None:
+        try:
+            await asyncio.sleep(max(0.0, settings.rag_waiting_audio_delay_s))
+            filler_audio = await asyncio.to_thread(waiting_audio.build_waiting_audio, language)
+            if len(filler_audio) > 0:
+                await self._send_audio(filler_audio)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Failed to play waiting audio during RAG lookup")
 
     def _log_turn_drop(
         self,

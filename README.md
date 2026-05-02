@@ -197,10 +197,14 @@ Suggested `.env` settings:
 
 ```env
 TRANSFER_HARNESS_ENABLED=true
+SIMULATION_HARNESS_ENABLED=true
 TRANSFER_ALLOW_CUSTOM_TARGETS=true
 TRANSFER_ALLOWED_NUMBERS=+14155550100,+14155550101
 TRANSFER_ALLOWED_SIP_DOMAINS=example.com,care.example.org
 TRANSFER_METADATA_MODE=compat
+RAG_WAITING_AUDIO_ENABLED=true
+RAG_WAITING_AUDIO_DELAY_S=0.35
+RAG_WAITING_AUDIO_ASSETS_DIR=app/assets/waiting_audio
 ```
 
 Transfer config behavior:
@@ -213,6 +217,10 @@ Transfer config behavior:
 - `TRANSFER_METADATA_MODE`:
   - `compat`: metadata on PSTN transfers is accepted and logged.
   - `strict`: metadata on PSTN transfers is rejected.
+- `RAG_WAITING_AUDIO_ENABLED`: plays short filler audio while RAG-backed response generation is pending.
+- `RAG_WAITING_AUDIO_DELAY_S`: grace delay before filler playback starts.
+- `RAG_WAITING_AUDIO_ASSETS_DIR`: directory for phrase/ambient `.wav` assets copied from HealthCoacher.
+  Current phrase selection supports `en`, `zh`, `yue`, and `ja`, with fallback to English.
 
 Harness examples:
 
@@ -301,29 +309,32 @@ git lfs install
 git add .gitattributes models/llm/<your-model>.gguf
 ```
 
-| Variable                        | Default                                 | Description                                     |
-| ------------------------------- | --------------------------------------- | ----------------------------------------------- |
-| `WHISPER_MODEL`                 | `small`                                 | faster-whisper model size                       |
-| `WHISPER_LANGUAGE`              | _(auto-detect)_                         | Pin transcription language                      |
-| `WHISPER_FALLBACK_ENABLED`      | `true`                                  | Enables secondary Whisper decode attempt        |
-| `WHISPER_PRIMARY_BEAM_SIZE`     | `5`                                     | Beam size for primary decode attempt            |
-| `WHISPER_FALLBACK_BEAM_SIZE`    | `1`                                     | Beam size for fallback decode attempt           |
-| `STT_MIN_TEXT_CHARACTERS`       | `2`                                     | Minimum transcript length before accept         |
-| `STT_MIN_QUALITY_SCORE`         | `0.25`                                  | Minimum heuristic quality score                 |
-| `VAD_ENABLED`                   | `true`                                  | Enables Silero streaming VAD segmentation       |
-| `VAD_THRESHOLD`                 | `0.5`                                   | Speech probability threshold                    |
-| `VAD_MIN_SILENCE_MS`            | `300`                                   | Silence duration required to close turn         |
-| `VAD_SPEECH_PAD_MS`             | `96`                                    | Speech padding around detected boundaries       |
-| `VAD_PREROLL_MS`                | `96`                                    | Audio preroll retained before speech start      |
-| `PIPER_BINARY`                  | `piper`                                 | Path to the Piper executable                    |
-| `PIPER_MODEL_PATH`              | `models/piper/en_US-lessac-medium.onnx` | Piper voice model                               |
-| `OLLAMA_MODEL`                  | `llama3.2:3b`                           | Ollama model tag                                |
-| `OLLAMA_BASE_URL`               | `http://localhost:11434`                | Ollama API base URL                             |
-| `SILENCE_TIMEOUT_S`             | `1.5`                                   | Seconds of silence before turn processing       |
-| `PUBLIC_HOST`                   | `localhost`                             | Hostname used in the TwiML `<Stream>` URL       |
-| `TRANSFER_HARNESS_ENABLED`      | `false`                                 | Enables transfer harness endpoint               |
-| `SIMULATION_HARNESS_ENABLED`    | `false`                                 | Enables simulation report endpoint              |
-| `TRANSFER_ALLOW_CUSTOM_TARGETS` | `false`                                 | Allows custom transfer targets beyond 911/988   |
-| `TRANSFER_ALLOWED_NUMBERS`      | _(empty)_                               | Comma-separated PSTN/E.164 transfer allowlist   |
-| `TRANSFER_ALLOWED_SIP_DOMAINS`  | _(empty)_                               | Comma-separated SIP domain allowlist            |
-| `TRANSFER_METADATA_MODE`        | `compat`                                | PSTN metadata handling mode (`compat`/`strict`) |
+| Variable                        | Default                                 | Description                                           |
+| ------------------------------- | --------------------------------------- | ----------------------------------------------------- |
+| `WHISPER_MODEL`                 | `small`                                 | faster-whisper model size                             |
+| `WHISPER_LANGUAGE`              | _(auto-detect)_                         | Pin transcription language                            |
+| `WHISPER_FALLBACK_ENABLED`      | `true`                                  | Enables secondary Whisper decode attempt              |
+| `WHISPER_PRIMARY_BEAM_SIZE`     | `5`                                     | Beam size for primary decode attempt                  |
+| `WHISPER_FALLBACK_BEAM_SIZE`    | `1`                                     | Beam size for fallback decode attempt                 |
+| `STT_MIN_TEXT_CHARACTERS`       | `2`                                     | Minimum transcript length before accept               |
+| `STT_MIN_QUALITY_SCORE`         | `0.25`                                  | Minimum heuristic quality score                       |
+| `VAD_ENABLED`                   | `true`                                  | Enables Silero streaming VAD segmentation             |
+| `VAD_THRESHOLD`                 | `0.5`                                   | Speech probability threshold                          |
+| `VAD_MIN_SILENCE_MS`            | `300`                                   | Silence duration required to close turn               |
+| `VAD_SPEECH_PAD_MS`             | `96`                                    | Speech padding around detected boundaries             |
+| `VAD_PREROLL_MS`                | `96`                                    | Audio preroll retained before speech start            |
+| `PIPER_BINARY`                  | `piper`                                 | Path to the Piper executable                          |
+| `PIPER_MODEL_PATH`              | `models/piper/en_US-lessac-medium.onnx` | Piper voice model                                     |
+| `OLLAMA_MODEL`                  | `llama3.2:3b`                           | Ollama model tag                                      |
+| `OLLAMA_BASE_URL`               | `http://localhost:11434`                | Ollama API base URL                                   |
+| `SILENCE_TIMEOUT_S`             | `1.5`                                   | Seconds of silence before turn processing             |
+| `PUBLIC_HOST`                   | `localhost`                             | Hostname used in the TwiML `<Stream>` URL             |
+| `TRANSFER_HARNESS_ENABLED`      | `false`                                 | Enables transfer harness endpoint                     |
+| `SIMULATION_HARNESS_ENABLED`    | `false`                                 | Enables simulation report endpoint                    |
+| `TRANSFER_ALLOW_CUSTOM_TARGETS` | `false`                                 | Allows custom transfer targets beyond 911/988         |
+| `TRANSFER_ALLOWED_NUMBERS`      | _(empty)_                               | Comma-separated PSTN/E.164 transfer allowlist         |
+| `TRANSFER_ALLOWED_SIP_DOMAINS`  | _(empty)_                               | Comma-separated SIP domain allowlist                  |
+| `TRANSFER_METADATA_MODE`        | `compat`                                | PSTN metadata handling mode (`compat`/`strict`)       |
+| `RAG_WAITING_AUDIO_ENABLED`     | `false`                                 | Plays filler phrase and ambient audio during RAG wait |
+| `RAG_WAITING_AUDIO_DELAY_S`     | `0.35`                                  | Delay before waiting audio starts                     |
+| `RAG_WAITING_AUDIO_ASSETS_DIR`  | `app/assets/waiting_audio`              | Waiting-audio asset directory                         |

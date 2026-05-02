@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from collections import deque
 
@@ -17,6 +18,7 @@ from app.services.telephony import (
     pcm16_to_mulaw,
     upsample,
 )
+from app.services import waiting_audio
 from app.core.config import settings
 from app.models.schemas import TranscriptionResult
 from app.services.vad import StreamingSpeechDetector
@@ -251,6 +253,64 @@ async def test_run_turn_sticks_to_sherpa_after_first_sherpa_result(monkeypatch) 
     await session._run_turn(audio)
 
     assert preferred_backends == [None, "sherpa"]
+
+
+@pytest.mark.asyncio
+async def test_run_turn_plays_waiting_audio_during_rag_lookup(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    monkeypatch.setattr(settings, "rag_enabled", True)
+    monkeypatch.setattr(settings, "rag_waiting_audio_enabled", True)
+    monkeypatch.setattr(settings, "rag_waiting_audio_delay_s", 0.0)
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="tell me about safer use",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    async def _fake_generate(_conversation):
+        await asyncio.sleep(0.01)
+        return "I can help with that."
+
+    async def _fake_synthesize(_text, *, language=None):
+        return np.zeros(22050, dtype=np.float32)
+
+    send_lengths: list[int] = []
+
+    async def _fake_send_audio(samples):
+        send_lengths.append(len(samples))
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.llm.generate", _fake_generate)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr(
+        "app.services.telephony.waiting_audio.build_waiting_audio",
+        lambda language=None: np.ones(4000, dtype=np.float32),
+    )
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+
+    await session._run_turn(audio)
+
+    assert len(send_lengths) == 2
+    assert send_lengths[0] == 4000
+    assert send_lengths[1] == 22050
+
+
+def test_waiting_audio_selects_multilingual_phrase_assets() -> None:
+    assert waiting_audio._resolve_phrase_language("en") == "en-US"
+    assert waiting_audio._resolve_phrase_language("zh") == "zh-CN"
+    assert waiting_audio._resolve_phrase_language("zh-CN") == "zh-CN"
+    assert waiting_audio._resolve_phrase_language("yue-Hant-HK") == "yue-Hant-HK"
+    assert waiting_audio._resolve_phrase_language("ja") == "ja-JP"
+    assert waiting_audio._resolve_phrase_language("fr") == "en-US"
 
 
 def test_parse_transfer_directive_extracts_target_and_spoken_reply() -> None:

@@ -109,6 +109,12 @@ class Settings(BaseSettings):
     # ── RAG ─────────────────────────────────────────────────────────────────
     rag_enabled: bool = False
     rag_config_path: str = "app/core/rag_config.json"
+    # Play short filler audio while RAG-backed response generation is in progress.
+    rag_waiting_audio_enabled: bool = False
+    # Delay before filler audio starts so short retrievals do not get interrupted.
+    rag_waiting_audio_delay_s: float = 0.35
+    # Directory containing phrase and ambient wav assets used during RAG wait time.
+    rag_waiting_audio_assets_dir: str = "app/assets/waiting_audio"
 
 
     # ── Audio pipeline ───────────────────────────────────────────────────────
