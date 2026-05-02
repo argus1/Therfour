@@ -158,6 +158,7 @@ class CallSession:
         self._processing = False
         self._loop = asyncio.get_event_loop()
         self._speech_detector: Optional[StreamingSpeechDetector] = None
+        self._vad_backend_name: Literal["silero", "silence_timeout_fallback", "disabled"] = "disabled"
         self._stt_backend_sticky: Optional[stt.STTBackendName] = None
         self._active_turn_task: Optional[asyncio.Task] = None
         # Low-confidence confirmation state
@@ -180,10 +181,29 @@ class CallSession:
             if silero_vad_available():
                 try:
                     self._speech_detector = StreamingSpeechDetector()
+                    self._vad_backend_name = "silero"
                 except Exception:
-                    logger.exception("Failed to initialize Silero VAD; falling back to silence timer")
+                    self._vad_backend_name = "silence_timeout_fallback"
+                    logger.exception(
+                        "Failed to initialize Silero VAD; using silence timeout fallback (vad_mode=%s)",
+                        self._vad_backend_name,
+                    )
             else:
-                logger.warning("Silero VAD is not available; using silence timeout fallback")
+                self._vad_backend_name = "silence_timeout_fallback"
+                logger.warning(
+                    "Silero VAD is unavailable; using silence timeout fallback (vad_mode=%s)",
+                    self._vad_backend_name,
+                )
+        else:
+            logger.info("VAD disabled by configuration (vad_mode=%s)", self._vad_backend_name)
+
+    def _build_vad_processing(self, audio: np.ndarray) -> CanonicalTurnProcessingVAD:
+        return CanonicalTurnProcessingVAD(
+            backend_name=self._vad_backend_name,
+            vad_voiced_duration_ms=round(
+                (len(audio) / settings.audio_sample_rate_whisper) * 1000
+            ),
+        )
 
     # ── Public entry point ────────────────────────────────────────────────────
 
@@ -336,11 +356,7 @@ class CallSession:
                 payload=CanonicalTurnPayload(
                     input=turn_input,
                     processing=CanonicalTurnProcessing(
-                        vad=CanonicalTurnProcessingVAD(
-                            vad_voiced_duration_ms=round(
-                                (len(audio) / settings.audio_sample_rate_whisper) * 1000
-                            )
-                        )
+                        vad=self._build_vad_processing(audio)
                     ),
                     status=CanonicalTurnStatus(
                         state=CanonicalTurnState.DROPPED,
@@ -372,6 +388,7 @@ class CallSession:
                 payload=CanonicalTurnPayload(
                     input=turn_input,
                     processing=CanonicalTurnProcessing(
+                        vad=self._build_vad_processing(audio),
                         stt=CanonicalTurnProcessingSTT(
                             backend_name=stt_result.backend_name,
                             transcript_text="",
@@ -437,6 +454,7 @@ class CallSession:
                         ),
                     ),
                     processing=CanonicalTurnProcessing(
+                        vad=self._build_vad_processing(audio),
                         stt=CanonicalTurnProcessingSTT(
                             backend_name=stt_result.backend_name,
                             transcript_text=text,
@@ -526,6 +544,7 @@ class CallSession:
                         ),
                     ),
                     processing=CanonicalTurnProcessing(
+                        vad=self._build_vad_processing(audio),
                         stt=CanonicalTurnProcessingSTT(
                             backend_name=stt_result.backend_name,
                             transcript_text=text,
@@ -573,11 +592,7 @@ class CallSession:
                     ),
                 ),
                 processing=CanonicalTurnProcessing(
-                    vad=CanonicalTurnProcessingVAD(
-                        vad_voiced_duration_ms=round(
-                            (len(audio) / settings.audio_sample_rate_whisper) * 1000
-                        )
-                    ),
+                    vad=self._build_vad_processing(audio),
                     stt=CanonicalTurnProcessingSTT(
                         backend_name=stt_result.backend_name,
                         transcript_text=text,

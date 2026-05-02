@@ -8,6 +8,11 @@ and harm-prevention](https://doi.org/10.1080/13811118.2020.1823916) helplines. I
 all AI inference locally, and returns synthesised speech – no data ever leaves
 your infrastructure.
 
+Telephony support status:
+
+- Twilio Media Streams: production path
+- Asterisk/FreePBX (ARI ExternalMedia): compatibility work is pending (stubs only)
+
 ```
 Caller ──► Twilio ──► /calls/inbound (TwiML)
                          │
@@ -31,15 +36,15 @@ Caller ──► Twilio ──► /calls/inbound (TwiML)
 
 ## Tech stack
 
-| Layer       | Library / Tool                                                          |
-| ----------- | ----------------------------------------------------------------------- |
-| Web server  | [FastAPI](https://fastapi.tiangolo.com) + Uvicorn                       |
-| Telephony   | [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams) |
-| STT         | [faster-whisper](https://github.com/SYSTRAN/faster-whisper)             |
-| VAD         | [silero-vad](https://github.com/snakers4/silero-vad)                    |
-| TTS         | [Piper](https://github.com/rhasspy/piper)                               |
-| LLM         | [Ollama](https://ollama.com) (local, any model)                         |
-| Audio codec | Python `audioop` / `audioop-lts` + SciPy                                |
+| Layer       | Library / Tool                                                                                                   |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| Web server  | [FastAPI](https://fastapi.tiangolo.com) + Uvicorn                                                                |
+| Telephony   | [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams) (Asterisk/FreePBX compatibility pending) |
+| STT         | [faster-whisper](https://github.com/SYSTRAN/faster-whisper)                                                      |
+| VAD         | [silero-vad](https://github.com/snakers4/silero-vad)                                                             |
+| TTS         | [Piper](https://github.com/rhasspy/piper)                                                                        |
+| LLM         | [Ollama](https://ollama.com) (local, any model)                                                                  |
+| Audio codec | Python `audioop` / `audioop-lts` + SciPy                                                                         |
 
 ## Quick start
 

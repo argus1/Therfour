@@ -564,6 +564,50 @@ async def test_run_turn_emits_canonical_turn_response(monkeypatch) -> None:
     assert request.envelope.idempotency_key == response.envelope.idempotency_key
 
 
+@pytest.mark.asyncio
+async def test_run_turn_reports_vad_fallback_backend_in_canonical_event(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    session._vad_backend_name = "silence_timeout_fallback"
+    audio = np.zeros(6000, dtype=np.float32)
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="check fallback",
+            language="en",
+            confidence=0.9,
+            language_confidence=0.9,
+            transcript_quality_score=0.9,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    async def _fake_generate(_conversation, strategy=None, rag_allowed=None):
+        return "Fallback mode acknowledged."
+
+    async def _fake_synthesize(_text, *, language=None):
+        return np.zeros(22050, dtype=np.float32)
+
+    async def _fake_send_audio(_samples):
+        return None
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.llm.generate", _fake_generate)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+
+    await session._run_turn(audio)
+
+    response_events = [
+        event
+        for event in session._canonical_turn_events
+        if event.envelope.message_type.value == "turn.response"
+    ]
+    assert response_events
+    assert response_events[-1].payload.processing.vad is not None
+    assert response_events[-1].payload.processing.vad.backend_name == "silence_timeout_fallback"
+
+
 def test_waiting_audio_selects_multilingual_phrase_assets() -> None:
     assert waiting_audio._resolve_phrase_language("en") == "en-US"
     assert waiting_audio._resolve_phrase_language("zh") == "zh-CN"
