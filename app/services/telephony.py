@@ -137,8 +137,14 @@ class CallSession:
 
     _OUTBOUND_CHUNK = 160
 
-    def __init__(self, websocket) -> None:
+    def __init__(
+        self,
+        websocket,
+        *,
+        transport_protocol: Literal["twilio", "asterisk_ari"] = "twilio",
+    ) -> None:
         self._ws = websocket
+        self._transport_protocol = transport_protocol
         self._stream_sid: Optional[str] = None
         self._call_sid: Optional[str] = None
         self._trace_id: str = str(uuid4())
@@ -1200,15 +1206,17 @@ class CallSession:
                 )
             )
 
-        await self._ws.send_text(
-            json.dumps(
-                {
-                    "event": "mark",
-                    "streamSid": self._stream_sid,
-                    "mark": {"name": "end_of_response"},
-                }
+        # Twilio Media Streams support marker events; Asterisk ExternalMedia does not.
+        if self._transport_protocol == "twilio":
+            await self._ws.send_text(
+                json.dumps(
+                    {
+                        "event": "mark",
+                        "streamSid": self._stream_sid,
+                        "mark": {"name": "end_of_response"},
+                    }
+                )
             )
-        )
 
     async def _transfer_call(
         self,

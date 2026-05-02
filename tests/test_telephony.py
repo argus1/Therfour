@@ -183,6 +183,30 @@ async def test_call_session_interrupts_active_turn_on_speech_start() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_audio_emits_mark_for_twilio_transport() -> None:
+    websocket = _DummyWebSocket()
+    session = CallSession(websocket, transport_protocol="twilio")
+    session._stream_sid = "MZ123"
+    samples = np.zeros(22050, dtype=np.float32)
+
+    await session._send_audio(samples)
+
+    assert any('"event": "mark"' in message for message in websocket.sent_messages)
+
+
+@pytest.mark.asyncio
+async def test_send_audio_skips_mark_for_asterisk_transport() -> None:
+    websocket = _DummyWebSocket()
+    session = CallSession(websocket, transport_protocol="asterisk_ari")
+    session._stream_sid = "MZ123"
+    samples = np.zeros(22050, dtype=np.float32)
+
+    await session._send_audio(samples)
+
+    assert not any('"event": "mark"' in message for message in websocket.sent_messages)
+
+
+@pytest.mark.asyncio
 async def test_run_turn_drops_audio_shorter_than_minimum(monkeypatch) -> None:
     session = CallSession(_DummyWebSocket())
     audio = np.zeros(100, dtype=np.float32)
