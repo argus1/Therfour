@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     public_host: str = "localhost"
     # Enables /calls/transfer/harness integration endpoint for transfer simulation.
     transfer_harness_enabled: bool = False
+    # Enables /calls/simulation/report endpoint for simulation report generation.
+    simulation_harness_enabled: bool = False
     # Allows non-emergency custom transfer targets from directives/harness.
     transfer_allow_custom_targets: bool = False
     # Comma-separated allowlist for custom PSTN transfer targets (E.164 only).

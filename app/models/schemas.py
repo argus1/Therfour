@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -151,6 +151,71 @@ class TransferHarnessResponse(BaseModel):
     twiml: str
     executed_live_update: bool
     call_sid: str = ""
+
+
+class CallSimulationReportRequest(BaseModel):
+    """Input payload for simulation report endpoint."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tier: Literal["tier_a", "tier_b"] = "tier_a"
+    max_turns: int = Field(default=8, ge=1, le=64)
+    frustration_hangup_threshold: int = Field(default=6, ge=1, le=64)
+    force_low_confidence_every_n_turns: int = Field(default=0, ge=0, le=32)
+    use_live_therfour_llm: bool = False
+    opening_message: str = (
+        "Hi, this is Terris. I am here with you. What name would you like me to use for you today?"
+    )
+    caller_provider: Literal["ollama", "lmstudio"] = "ollama"
+    caller_base_url: str = ""
+    caller_model_name_override: str = ""
+    caller_timeout_s: float = Field(default=30.0, ge=1.0, le=300.0)
+    output_filename: str = ""
+
+
+class CallSimulationReportResponse(BaseModel):
+    """Response payload for simulation report endpoint."""
+
+    model_config = ConfigDict(frozen=True)
+
+    report_path: str
+    written: bool
+    report: dict[str, Any]
+
+
+class CallSimulationReportSummary(BaseModel):
+    """Metadata (and optional body) for one saved simulation report."""
+
+    model_config = ConfigDict(frozen=True)
+
+    filename: str
+    report_path: str
+    size_bytes: int
+    modified_at: str
+    generated_at: str = ""
+    report: Optional[dict[str, Any]] = None
+
+
+class RecentCallSimulationReportsResponse(BaseModel):
+    """Response payload for listing recent simulation reports."""
+
+    model_config = ConfigDict(frozen=True)
+
+    count: int
+    reports: list[CallSimulationReportSummary]
+
+
+class CallSimulationReportFileResponse(BaseModel):
+    """Response payload for a single saved simulation report file."""
+
+    model_config = ConfigDict(frozen=True)
+
+    filename: str
+    report_path: str
+    size_bytes: int
+    modified_at: str
+    generated_at: str = ""
+    report: dict[str, Any]
 
 
 def make_health_response(app_version: str, whisper_model: str, ollama_model: str) -> HealthResponse:

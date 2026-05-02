@@ -206,6 +206,7 @@ TRANSFER_METADATA_MODE=compat
 Transfer config behavior:
 
 - `TRANSFER_HARNESS_ENABLED`: enables `POST /calls/transfer/harness`.
+- `SIMULATION_HARNESS_ENABLED`: enables `POST /calls/simulation/report`.
 - `TRANSFER_ALLOW_CUSTOM_TARGETS`: allows non-`911`/`988` targets.
 - `TRANSFER_ALLOWED_NUMBERS`: allowlist for custom PSTN numbers.
 - `TRANSFER_ALLOWED_SIP_DOMAINS`: allowlist for SIP destination domains.
@@ -239,6 +240,27 @@ curl -X POST http://localhost:8000/calls/transfer/harness \
     "priority": "normal",
     "execute_live_update": false
   }'
+
+# Simulation report writer (Tier A headless)
+curl -X POST http://localhost:8000/calls/simulation/report \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "tier": "tier_a",
+    "max_turns": 8,
+    "frustration_hangup_threshold": 6,
+    "force_low_confidence_every_n_turns": 3,
+    "use_live_therfour_llm": false,
+    "output_filename": "sim_report.json"
+  }'
+
+# Fetch recent simulation reports (metadata only)
+curl "http://localhost:8000/calls/simulation/reports/recent?limit=5"
+
+# Fetch recent simulation reports with embedded report body
+curl "http://localhost:8000/calls/simulation/reports/recent?limit=5&include_report=true"
+
+# Fetch a single simulation report by filename
+curl "http://localhost:8000/calls/simulation/reports/sim_report.json"
 ```
 
 LLM transfer directives:
@@ -300,6 +322,7 @@ git add .gitattributes models/llm/<your-model>.gguf
 | `SILENCE_TIMEOUT_S`             | `1.5`                                   | Seconds of silence before turn processing       |
 | `PUBLIC_HOST`                   | `localhost`                             | Hostname used in the TwiML `<Stream>` URL       |
 | `TRANSFER_HARNESS_ENABLED`      | `false`                                 | Enables transfer harness endpoint               |
+| `SIMULATION_HARNESS_ENABLED`    | `false`                                 | Enables simulation report endpoint              |
 | `TRANSFER_ALLOW_CUSTOM_TARGETS` | `false`                                 | Allows custom transfer targets beyond 911/988   |
 | `TRANSFER_ALLOWED_NUMBERS`      | _(empty)_                               | Comma-separated PSTN/E.164 transfer allowlist   |
 | `TRANSFER_ALLOWED_SIP_DOMAINS`  | _(empty)_                               | Comma-separated SIP domain allowlist            |

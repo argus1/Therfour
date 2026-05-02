@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -16,6 +20,7 @@ from app.models.schemas import (
     TurnProcessingResult,
 )
 from app.core.config import settings
+from app.models.Call_SImulation_Agent import SimulationReport, SimulationTier
 
 
 def test_health_returns_ok(client: TestClient) -> None:
@@ -151,6 +156,173 @@ def test_transfer_harness_number_metadata_strict_mode_rejected(client: TestClien
 
     assert resp.status_code == 400
     assert "strict mode" in resp.json()["detail"]
+
+
+def test_simulation_report_harness_disabled_returns_403(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "simulation_harness_enabled", False)
+    monkeypatch.setattr(settings, "debug", False)
+
+    resp = client.post("/calls/simulation/report", json={})
+
+    assert resp.status_code == 403
+    assert "disabled" in resp.json()["detail"].lower()
+
+
+def test_simulation_report_writes_json_file(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "simulation_harness_enabled", True)
+
+    async def _fake_run(self):
+        return SimulationReport(
+            tier=SimulationTier.TIER_A_HEADLESS,
+            completed_turns=2,
+            frustration_score=1,
+            hangup_triggered=False,
+            hangup_reason="",
+            transfer_target="",
+            pleasant_ending_detected=True,
+            opening_message="Hello",
+            turns=[],
+            notes="ok",
+        )
+
+    monkeypatch.setattr("app.api.routes.calls.CallSimulationAgent.run", _fake_run)
+
+    filename = "api_sim_report_test.json"
+    report_path = Path("app/models/Call_SImulation_Agent/reports") / filename
+    if report_path.exists():
+        report_path.unlink()
+
+    try:
+        resp = client.post(
+            "/calls/simulation/report",
+            json={
+                "tier": "tier_a",
+                "output_filename": filename,
+                "use_live_therfour_llm": False,
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["written"] is True
+        assert body["report"]["completed_turns"] == 2
+        assert report_path.exists()
+    finally:
+        if report_path.exists():
+            report_path.unlink()
+
+
+def test_recent_simulation_reports_disabled_returns_403(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "simulation_harness_enabled", False)
+    monkeypatch.setattr(settings, "debug", False)
+
+    resp = client.get("/calls/simulation/reports/recent")
+
+    assert resp.status_code == 403
+    assert "disabled" in resp.json()["detail"].lower()
+
+
+def test_recent_simulation_reports_returns_sorted_items(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "simulation_harness_enabled", True)
+
+    reports_dir = Path("app/models/Call_SImulation_Agent/reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    older = reports_dir / "recent_test_older.json"
+    newer = reports_dir / "recent_test_newer.json"
+
+    try:
+        older.write_text(
+            json.dumps({"generated_at": "2026-05-01T00:00:00Z", "report": {"id": "older"}}),
+            encoding="utf-8",
+        )
+        newer.write_text(
+            json.dumps({"generated_at": "2026-05-01T00:01:00Z", "report": {"id": "newer"}}),
+            encoding="utf-8",
+        )
+
+        os.utime(older, (1000, 1000))
+        os.utime(newer, (2000, 2000))
+
+        resp = client.get("/calls/simulation/reports/recent?limit=2")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 2
+        assert body["reports"][0]["filename"] == "recent_test_newer.json"
+        assert body["reports"][1]["filename"] == "recent_test_older.json"
+        assert body["reports"][0]["report"] is None
+    finally:
+        if older.exists():
+            older.unlink()
+        if newer.exists():
+            newer.unlink()
+
+
+def test_recent_simulation_reports_can_include_report_payload(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "simulation_harness_enabled", True)
+
+    reports_dir = Path("app/models/Call_SImulation_Agent/reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    sample = reports_dir / "recent_test_include.json"
+
+    try:
+        sample.write_text(
+            json.dumps({"generated_at": "2026-05-01T00:02:00Z", "report": {"tier": "tier_a"}}),
+            encoding="utf-8",
+        )
+
+        resp = client.get("/calls/simulation/reports/recent?limit=1&include_report=true")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 1
+        assert body["reports"][0]["filename"] == "recent_test_include.json"
+        assert body["reports"][0]["report"] == {"tier": "tier_a"}
+    finally:
+        if sample.exists():
+            sample.unlink()
+
+
+def test_get_simulation_report_file_disabled_returns_403(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "simulation_harness_enabled", False)
+    monkeypatch.setattr(settings, "debug", False)
+
+    resp = client.get("/calls/simulation/reports/some_report.json")
+
+    assert resp.status_code == 403
+    assert "disabled" in resp.json()["detail"].lower()
+
+
+def test_get_simulation_report_file_returns_payload(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "simulation_harness_enabled", True)
+
+    reports_dir = Path("app/models/Call_SImulation_Agent/reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    sample = reports_dir / "single_fetch_test.json"
+
+    try:
+        sample.write_text(
+            json.dumps({"generated_at": "2026-05-01T00:03:00Z", "report": {"turns": 3}}),
+            encoding="utf-8",
+        )
+
+        resp = client.get("/calls/simulation/reports/single_fetch_test.json")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["filename"] == "single_fetch_test.json"
+        assert body["report"] == {"turns": 3}
+    finally:
+        if sample.exists():
+            sample.unlink()
+
+
+def test_get_simulation_report_file_returns_404_when_missing(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "simulation_harness_enabled", True)
+
+    resp = client.get("/calls/simulation/reports/does_not_exist.json")
+
+    assert resp.status_code == 404
 
 
 # Contract-focused tests for data models
