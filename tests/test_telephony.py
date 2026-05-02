@@ -11,6 +11,7 @@ import pytest
 
 from app.services.telephony import (
     CallSession,
+    _sanitize_model_reply,
     build_transfer_twiml,
     downsample,
     get_custom_transfer_post_call_reopen_mode,
@@ -271,7 +272,7 @@ async def test_run_turn_sticks_to_sherpa_after_first_sherpa_result(monkeypatch) 
         preferred_backends.append(preferred_backend)
         return responses.pop(0)
 
-    async def _fake_generate(_conversation):
+    async def _fake_generate(_conversation, strategy=None, rag_allowed=None):
         return "ok"
 
     async def _fake_synthesize(_text, *, language=None):
@@ -312,7 +313,7 @@ async def test_run_turn_plays_waiting_audio_during_rag_lookup(monkeypatch) -> No
             failure_reason="",
         )
 
-    async def _fake_generate(_conversation):
+    async def _fake_generate(_conversation, strategy=None, rag_allowed=None):
         await asyncio.sleep(0.01)
         return "I can help with that."
 
@@ -338,6 +339,150 @@ async def test_run_turn_plays_waiting_audio_during_rag_lookup(monkeypatch) -> No
     assert len(send_lengths) == 2
     assert send_lengths[0] == 4000
     assert send_lengths[1] == 22050
+
+
+@pytest.mark.asyncio
+async def test_run_turn_routes_rapport_mode_with_no_rag(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    monkeypatch.setattr(settings, "turn_strategy_router_enabled", True)
+    monkeypatch.setattr(settings, "turn_strategy_no_rag_for_rapport", True)
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="I feel overwhelmed and alone.",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    captured: dict = {}
+
+    async def _fake_generate(_conversation, strategy=None, rag_allowed=None):
+        captured["strategy"] = strategy
+        captured["rag_allowed"] = rag_allowed
+        return "I hear you, and I am here with you. What feels hardest right now?"
+
+    async def _fake_synthesize(_text, *, language=None):
+        return np.zeros(22050, dtype=np.float32)
+
+    async def _fake_send_audio(_samples):
+        return None
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.llm.generate", _fake_generate)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+
+    await session._run_turn(audio)
+
+    assert captured["strategy"] == "rapport_building"
+    assert captured["rag_allowed"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_turn_routes_understanding_check_mode_with_no_rag(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    monkeypatch.setattr(settings, "turn_strategy_router_enabled", True)
+    monkeypatch.setattr(settings, "turn_strategy_no_rag_for_understanding_check", True)
+
+    # Seed a prior clause-dense assistant response so brief user acknowledgment
+    # triggers the understanding-check strategy.
+    session._conversation.append(
+        {
+            "role": "assistant",
+            "content": (
+                "Here are steps: 1. Keep naloxone nearby. 2. Do not use alone. "
+                "3. Test in small amounts. 4. Call 911 if breathing slows."
+            ),
+        }
+    )
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="Okay, I guess.",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    captured: dict = {}
+
+    async def _fake_generate(_conversation, strategy=None, rag_allowed=None):
+        captured["strategy"] = strategy
+        captured["rag_allowed"] = rag_allowed
+        return "Let me check we are aligned."
+
+    async def _fake_synthesize(_text, *, language=None):
+        return np.zeros(22050, dtype=np.float32)
+
+    async def _fake_send_audio(_samples):
+        return None
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.llm.generate", _fake_generate)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+
+    await session._run_turn(audio)
+
+    assert captured["strategy"] == "understanding_check_no_rag"
+    assert captured["rag_allowed"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_turn_routes_explanation_mode_with_rag_optional(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    monkeypatch.setattr(settings, "turn_strategy_router_enabled", True)
+    monkeypatch.setattr(settings, "turn_strategy_rag_optional_for_explanation", True)
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="I do not understand what you meant. Can you explain that again?",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    captured: dict = {}
+
+    async def _fake_generate(_conversation, strategy=None, rag_allowed=None):
+        captured["strategy"] = strategy
+        captured["rag_allowed"] = rag_allowed
+        return "Let me re-explain in simpler steps."
+
+    async def _fake_synthesize(_text, *, language=None):
+        return np.zeros(22050, dtype=np.float32)
+
+    async def _fake_send_audio(_samples):
+        return None
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.llm.generate", _fake_generate)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize", _fake_synthesize)
+    monkeypatch.setattr(session, "_send_audio", _fake_send_audio)
+
+    await session._run_turn(audio)
+
+    assert captured["strategy"] == "explanation_rag_optional"
+    assert captured["rag_allowed"] is True
 
 
 def test_waiting_audio_selects_multilingual_phrase_assets() -> None:
@@ -439,7 +584,7 @@ async def test_run_turn_executes_transfer_when_directive_present(monkeypatch) ->
             failure_reason="",
         )
 
-    async def _fake_generate(_conversation):
+    async def _fake_generate(_conversation, strategy=None, rag_allowed=None):
         return "TRANSFER:988\nConnecting you to 988 now."
 
     transfer_calls: list[tuple[str, str, str]] = []
@@ -546,6 +691,21 @@ def test_transfer_confirmation_prompt_returns_target_specific_message() -> None:
     assert "permission" in _transfer_confirmation_prompt("+14155551212")
 
 
+def test_sanitize_model_reply_removes_think_blocks() -> None:
+    raw = "<think>internal chain-of-thought</think>\nTRANSFER:988\nConnecting you now."
+    assert _sanitize_model_reply(raw) == "TRANSFER:988\nConnecting you now."
+
+
+def test_sanitize_model_reply_removes_think_tag_variants() -> None:
+    raw = "<think1>hidden</think1>\nUseful spoken text."
+    assert _sanitize_model_reply(raw) == "Useful spoken text."
+
+
+def test_sanitize_model_reply_removes_emphasis_hint_lines() -> None:
+    raw = 'EMPHASIS-HINTS: "naloxone" | "call 911"\nUseful spoken text.'
+    assert _sanitize_model_reply(raw) == "Useful spoken text."
+
+
 def test_get_transfer_post_call_reopen_mode_compat_fallback(monkeypatch) -> None:
     monkeypatch.setattr(settings, "transfer_post_call_reopen_mode", "off")
     monkeypatch.setattr(settings, "transfer_stay_on_line_enabled", True)
@@ -583,7 +743,7 @@ async def test_run_turn_enters_transfer_confirmation_when_required(monkeypatch) 
             failure_reason="",
         )
 
-    async def _fake_generate(_conversation):
+    async def _fake_generate(_conversation, strategy=None, rag_allowed=None):
         return "TRANSFER:911\nConnecting you to emergency services now."
 
     synthesized_texts: list[str] = []

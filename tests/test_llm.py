@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services import llm as llm_service
+from app.services.turn_strategy import TurnStrategy
 
 
 @pytest.mark.asyncio
@@ -52,6 +53,8 @@ def test_system_prompt_mentions_scope_boundary_and_crisis_routing() -> None:
     prompt = llm_service.HARM_REDUCTION_SYSTEM_PROMPT.lower()
     assert "outside harm reduction support" in prompt
     assert "988" in llm_service.HARM_REDUCTION_SYSTEM_PROMPT
+    assert "do not ask for transfer permission" in prompt
+    assert "are you okay with this" in prompt
 
 
 def test_safety_guardrails_include_anti_fabrication_rule() -> None:
@@ -192,3 +195,76 @@ async def test_generate_uses_lmstudio_endpoint_and_response_shape(monkeypatch) -
     assert payload["stream"] is False
     assert isinstance(result, str)
     assert "safety" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_construct_turn_suppresses_rag_for_rapport_strategy(monkeypatch) -> None:
+    monkeypatch.setattr(llm_service.settings, "rag_enabled", True)
+
+    with patch("app.services.llm.rag.retrieve") as mock_retrieve:
+        turn = await llm_service._construct_turn(
+            [{"role": "user", "content": "I feel overwhelmed and alone."}],
+            strategy=TurnStrategy.RAPPORT_BUILDING.value,
+            rag_allowed=False,
+        )
+
+    assert turn.rag_used is False
+    assert "Turn strategy: rapport_building" in turn.messages[0]["content"]
+    mock_retrieve.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_construct_turn_suppresses_rag_for_info_gathering_strategy(monkeypatch) -> None:
+    monkeypatch.setattr(llm_service.settings, "rag_enabled", True)
+
+    with patch("app.services.llm.rag.retrieve") as mock_retrieve:
+        turn = await llm_service._construct_turn(
+            [{"role": "user", "content": "I do not feel safe tonight."}],
+            strategy=TurnStrategy.INFO_GATHERING_NO_RAG.value,
+            rag_allowed=False,
+        )
+
+    assert turn.rag_used is False
+    assert "Turn strategy: info_gathering_no_rag" in turn.messages[0]["content"]
+    mock_retrieve.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_construct_turn_suppresses_rag_for_understanding_check_strategy(monkeypatch) -> None:
+    monkeypatch.setattr(llm_service.settings, "rag_enabled", True)
+
+    with patch("app.services.llm.rag.retrieve") as mock_retrieve:
+        turn = await llm_service._construct_turn(
+            [{"role": "user", "content": "Okay, I guess."}],
+            strategy=TurnStrategy.UNDERSTANDING_CHECK_NO_RAG.value,
+            rag_allowed=False,
+        )
+
+    assert turn.rag_used is False
+    assert "Turn strategy: understanding_check_no_rag" in turn.messages[0]["content"]
+    mock_retrieve.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_construct_turn_allows_rag_for_explanation_strategy(monkeypatch) -> None:
+    monkeypatch.setattr(llm_service.settings, "rag_enabled", True)
+
+    fake_result = MagicMock(
+        strategy_used="hierarchical",
+        selected_category="general",
+        candidate_count=2,
+        filtered_count=1,
+        contexts=[MagicMock()],
+    )
+
+    with patch("app.services.llm.rag.retrieve", return_value=fake_result) as mock_retrieve:
+        with patch("app.services.llm.rag.build_context_block", return_value="Retrieved context block"):
+            turn = await llm_service._construct_turn(
+                [{"role": "user", "content": "I do not understand, can you explain?"}],
+                strategy=TurnStrategy.EXPLANATION_RAG_OPTIONAL.value,
+                rag_allowed=True,
+            )
+
+    assert turn.rag_used is True
+    assert "Turn strategy: explanation_rag_optional" in turn.messages[0]["content"]
+    mock_retrieve.assert_called_once()

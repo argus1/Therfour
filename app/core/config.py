@@ -145,6 +145,18 @@ class Settings(BaseSettings):
     rag_waiting_audio_assets_dir: str = "app/assets/waiting_audio"
     # Interrupt active assistant generation/playback when caller speech resumes.
     turn_interrupt_enabled: bool = True
+    # Enable per-turn routing between rapport, info gathering, and RAG-eligible modes.
+    turn_strategy_router_enabled: bool = True
+    # Force no-RAG mode for rapport-building turns.
+    turn_strategy_no_rag_for_rapport: bool = True
+    # Force no-RAG mode for information-gathering turns.
+    turn_strategy_no_rag_for_info_gathering: bool = True
+    # Force no-RAG mode for understanding-check turns.
+    turn_strategy_no_rag_for_understanding_check: bool = True
+    # Allow retrieval during explanation turns when understanding gaps are detected.
+    turn_strategy_rag_optional_for_explanation: bool = True
+    # Emit debug logs for selected turn strategy and RAG usage.
+    turn_strategy_debug_logging: bool = True
 
 
     # ── Audio pipeline ───────────────────────────────────────────────────────

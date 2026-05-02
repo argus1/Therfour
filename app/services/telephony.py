@@ -25,6 +25,7 @@ from scipy.signal import resample_poly
 from app.core.config import settings
 from app.services import call_flow_phrases
 from app.services import llm, stt, tts
+from app.services import turn_strategy
 from app.services import waiting_audio
 from app.services import transfer_services
 from app.services.stt_confidence import LowConfidenceHandler
@@ -37,6 +38,11 @@ _TRANSFER_DIRECTIVE_PATTERN = re.compile(r"^TRANSFER:\s*(911|988)\s*$", re.IGNOR
 _TRANSFER_V2_PATTERN = re.compile(r"^TRANSFER:\s*(number|sip)\s*:\s*(.+)$", re.IGNORECASE)
 _TRANSFER_META_PATTERN = re.compile(r"^TRANSFER-META:\s*(.+)$", re.IGNORECASE)
 _E164_PATTERN = re.compile(r"^\+[1-9]\d{6,14}$")
+_THINK_BLOCK_PATTERN = re.compile(r"<think[^>]*>.*?</think[^>]*>", re.IGNORECASE | re.DOTALL)
+_EMPHASIS_HINTS_PATTERN = re.compile(r"^EMPHASIS-HINTS:\s*(.+)$", re.IGNORECASE)
+_CLAUSE_AWARE_TTS_PLAN_DOC = (
+    "Documentation/alignment_plan/Streaming_Implmentation_Considerations_and_plan.md"
+)
 
 
 @dataclass(frozen=True)
@@ -44,6 +50,14 @@ class TransferDirective:
     target_kind: Literal["number", "sip"]
     target: str
     metadata: dict[str, str]
+
+
+@dataclass(frozen=True)
+class ClauseAwareTTSStubHints:
+    """Temporary hint container for future clause-aware/emphasis TTS implementation."""
+
+    phrases: tuple[str, ...]
+    source_doc: str = _CLAUSE_AWARE_TTS_PLAN_DOC
 
 
 def get_transfer_post_call_reopen_mode() -> Literal["off", "auto", "prompt"]:
@@ -315,11 +329,34 @@ class CallSession:
             return
 
         # ── 4. LLM ────────────────────────────────────────────────────────────
+        strategy_decision = self._select_turn_strategy(text)
+        strategy = strategy_decision.strategy
+        rag_allowed = self._rag_allowed_for_strategy(strategy)
+        if settings.turn_strategy_debug_logging:
+            logger.info(
+                "Turn strategy selected: strategy=%s reason=%s rag_allowed=%s",
+                strategy.value,
+                strategy_decision.reason,
+                rag_allowed,
+            )
+
         self._conversation.append({"role": "user", "content": text})
-        reply = await self._generate_with_optional_waiting_audio(stt_result.language)
+        raw_reply = await self._generate_with_optional_waiting_audio(
+            stt_result.language,
+            strategy=strategy,
+            rag_allowed=rag_allowed,
+        )
+        clause_tts_hints = _extract_clause_aware_tts_stub_hints(raw_reply)
+        reply = _sanitize_model_reply(raw_reply)
         transfer, spoken_reply = parse_transfer_directive(reply)
         self._conversation.append({"role": "assistant", "content": spoken_reply})
         logger.info("LLM reply: %s", spoken_reply)
+        if clause_tts_hints.phrases:
+            logger.info(
+                "Clause-aware TTS hints captured (stub): phrases=%s source=%s",
+                clause_tts_hints.phrases,
+                clause_tts_hints.source_doc,
+            )
 
         if transfer is not None:
             should_prompt_post_call = (
@@ -631,10 +668,33 @@ class CallSession:
             
             # Add the original (confirmed) text to conversation and process with RAG
             self._conversation.append({"role": "user", "content": self._pending_low_confidence_text})
-            reply = await self._generate_with_optional_waiting_audio(response_result.language)
+            strategy_decision = self._select_turn_strategy(self._pending_low_confidence_text)
+            strategy = strategy_decision.strategy
+            rag_allowed = self._rag_allowed_for_strategy(strategy)
+            if settings.turn_strategy_debug_logging:
+                logger.info(
+                    "Turn strategy selected (post-confirmation): strategy=%s reason=%s rag_allowed=%s",
+                    strategy.value,
+                    strategy_decision.reason,
+                    rag_allowed,
+                )
+
+            raw_reply = await self._generate_with_optional_waiting_audio(
+                response_result.language,
+                strategy=strategy,
+                rag_allowed=rag_allowed,
+            )
+            clause_tts_hints = _extract_clause_aware_tts_stub_hints(raw_reply)
+            reply = _sanitize_model_reply(raw_reply)
             transfer, spoken_reply = parse_transfer_directive(reply)
             self._conversation.append({"role": "assistant", "content": spoken_reply})
             logger.info("LLM reply (after confirmation): %s", spoken_reply)
+            if clause_tts_hints.phrases:
+                logger.info(
+                    "Clause-aware TTS hints captured (stub, post-confirmation): phrases=%s source=%s",
+                    clause_tts_hints.phrases,
+                    clause_tts_hints.source_doc,
+                )
 
             if transfer is not None:
                 transfer_message = spoken_reply or _default_transfer_announcement(transfer.target)
@@ -788,13 +848,47 @@ class CallSession:
             )
         )
 
-    async def _generate_with_optional_waiting_audio(self, language: str | None) -> str:
-        if not settings.rag_enabled or not settings.rag_waiting_audio_enabled:
-            return await llm.generate(self._conversation)
+    def _select_turn_strategy(self, user_text: str) -> turn_strategy.TurnStrategyDecision:
+        if not settings.turn_strategy_router_enabled:
+            return turn_strategy.TurnStrategyDecision(
+                strategy=turn_strategy.TurnStrategy.TASK_OR_KNOWLEDGE_RAG_ELIGIBLE,
+                reason="router_disabled",
+            )
+        return turn_strategy.classify_turn(user_text, self._conversation)
+
+    @staticmethod
+    def _rag_allowed_for_strategy(strategy: turn_strategy.TurnStrategy) -> bool:
+        if strategy == turn_strategy.TurnStrategy.RAPPORT_BUILDING:
+            return not settings.turn_strategy_no_rag_for_rapport
+        if strategy == turn_strategy.TurnStrategy.INFO_GATHERING_NO_RAG:
+            return not settings.turn_strategy_no_rag_for_info_gathering
+        if strategy == turn_strategy.TurnStrategy.UNDERSTANDING_CHECK_NO_RAG:
+            return not settings.turn_strategy_no_rag_for_understanding_check
+        if strategy == turn_strategy.TurnStrategy.EXPLANATION_RAG_OPTIONAL:
+            return settings.turn_strategy_rag_optional_for_explanation
+        return turn_strategy.rag_allowed_for_strategy(strategy)
+
+    async def _generate_with_optional_waiting_audio(
+        self,
+        language: str | None,
+        *,
+        strategy: turn_strategy.TurnStrategy,
+        rag_allowed: bool,
+    ) -> str:
+        if not rag_allowed or not settings.rag_enabled or not settings.rag_waiting_audio_enabled:
+            return await llm.generate(
+                self._conversation,
+                strategy=strategy.value,
+                rag_allowed=rag_allowed,
+            )
 
         waiting_task = asyncio.create_task(self._play_waiting_audio(language))
         try:
-            return await llm.generate(self._conversation)
+            return await llm.generate(
+                self._conversation,
+                strategy=strategy.value,
+                rag_allowed=rag_allowed,
+            )
         finally:
             if not waiting_task.done():
                 waiting_task.cancel()
@@ -969,6 +1063,40 @@ def parse_transfer_directive(reply: str) -> tuple[Optional[TransferDirective], s
         ),
         spoken_reply,
     )
+
+
+def _sanitize_model_reply(reply: str) -> str:
+    """Remove hidden reasoning and normalize whitespace before parsing/speaking."""
+    if not reply:
+        return ""
+    sanitized = _THINK_BLOCK_PATTERN.sub("", reply)
+    filtered_lines: list[str] = []
+    for line in sanitized.splitlines():
+        if _EMPHASIS_HINTS_PATTERN.match(line.strip()):
+            continue
+        filtered_lines.append(line)
+    return "\n".join(filtered_lines).strip()
+
+
+def _extract_clause_aware_tts_stub_hints(reply: str) -> ClauseAwareTTSStubHints:
+    """Extract optional emphasis hints without changing current speech behavior.
+
+    Planned linkage:
+    Documentation/alignment_plan/Streaming_Implmentation_Considerations_and_plan.md
+    """
+    if not reply:
+        return ClauseAwareTTSStubHints(phrases=())
+
+    phrases: list[str] = []
+    for raw_line in reply.splitlines():
+        match = _EMPHASIS_HINTS_PATTERN.match(raw_line.strip())
+        if not match:
+            continue
+        for part in match.group(1).split("|"):
+            phrase = part.strip().strip('"')
+            if phrase:
+                phrases.append(phrase)
+    return ClauseAwareTTSStubHints(phrases=tuple(phrases))
 
 
 def _parse_transfer_metadata(raw: str) -> dict[str, str]:

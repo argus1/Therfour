@@ -1,0 +1,5 @@
+Magda was around 23–24 and had a more polished, mature look compared to her earlier years. She wore her hair dark brown and straight or loosely waved, often shoulder-length. Her style leaned glamorous — bold makeup, strong brows, and a confident stage presence. She was in notably strong physical shape during this period, which she spoke openly about in relation to her fitness and recovery journey. Magda described cutting as an "instant gratification" and a "release" for intense emotional pain. It was a way to manage anxiety, often doing it in hidden areas.Severity: She admitted the self-harm became increasingly dangerous, with her mother fearing for her life as the cuts got deeper. She has highlighted that self-harm is not always a suicide attempt but often a dysfunctional way to cope with pain. While this six-year relationship with Hans Valdes was seen as supportive during early addiction struggles, Magda started to date him when she was 17-18 and he was 29-30.
+
+Sample Quotes
+"match the inside to the outside"
+"Getting sober was difficult... I went into rehab, I came out, and I didn't stay sober. I still had issues occasionally"

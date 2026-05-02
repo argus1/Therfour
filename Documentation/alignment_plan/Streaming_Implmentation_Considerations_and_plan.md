@@ -332,6 +332,17 @@ Likely touch points:
 - `benchmarks/`
   - add time-to-first-audio and interruption benchmarks
 
+### Current Stub Linkage (Implemented)
+
+The telephony stack now includes temporary clause-aware TTS stubs to prepare future streaming work:
+
+- Optional model control line format: `EMPHASIS-HINTS: "phrase one" | "phrase two"`
+- Hint lines are parsed into an internal stub hint container for future clause-aware synthesis.
+- Hint lines are removed from spoken output so callers only hear natural speech text.
+- Captured hints are logged with source linkage to this plan file.
+
+This keeps production behavior stable while creating integration points for later keyword/phrase emphasis in clause-aware synthesis.
+
 ## Final Conclusion
 
 True streaming is technically possible but not currently desirable for Therfour telephony.

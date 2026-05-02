@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 import httpx
 
@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.services.llm_backends import get_backend
 from app.services import rag
 from app.services import transfer_services
+from app.services.turn_strategy import TurnStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,12 @@ HARM_REDUCTION_SYSTEM_PROMPT = (
     "TRANSFER-META:forwarded-by=Terris;topic=<short-topic>;priority=<low|normal|high>.\n"
     "- After a TRANSFER directive, include exactly one short spoken sentence on the "
     "next line that the caller should hear at the moment the transfer starts.\n"
+    "- Do not ask for transfer permission in the model output. Terris asks the yes-or-no "
+    "confirmation question separately before any transfer executes.\n"
+    "- Do not include parenthetical transfer markers, inline TRANSFER text, or phrases like "
+    "'Are you okay with this?' in the spoken sentence.\n"
+    "- If you emit a TRANSFER directive, make the first line exactly the directive and keep "
+    "the next spoken sentence limited to concern and immediate next-step framing.\n"
     "- If asked for topics outside harm reduction support, decline briefly and "
     "redirect to harm-reduction-safe guidance and crisis resources when relevant.\n"
     "- Respect caller autonomy while providing honest safety information.\n"
@@ -74,12 +81,14 @@ HARM_REDUCTION_SYSTEM_PROMPT = (
 
 SAFETY_GUARDRAILS = (
     "\n\nSafety guardrails:\n"
-    "- Never provide instructions that help someone self-harm, attempt suicide, overdose, "
-    "or increase injury risk.\n"
+    "- You may provide practical safer-use guidance and non-harmful coping alternatives when "
+    "the goal is to reduce harm and keep the caller safe.\n"
+    "- Never provide instructions that increase, intensify, optimize, or make self-harm, "
+    "suicide attempts, overdose, or injury more likely.\n"
     "- If the caller asks for harmful instructions, refuse briefly, shift to immediate safety "
     "steps, and encourage contacting emergency support when risk is acute.\n"
-    "- You may discuss drug use openly for harm-reduction education, but never encourage "
-    "or coach dangerous use.\n"
+    "- You may discuss drug use and self-harm openly for harm-reduction education, but never "
+    "encourage, coach, or escalate dangerous behavior.\n"
     "- Never invent facts, clinical claims, service availability, or legal advice. If "
     "critical details are uncertain, say so briefly and provide the safest practical next "
     "step.\n"
@@ -102,6 +111,47 @@ DETERMINISTIC_TURN_POLICY = (
     "4) Respond with concise phone-friendly language (2-3 sentences)."
 )
 
+RAPPORT_LISTENING_CONTRACT = (
+    "\n\nTurn strategy: rapport_building\n"
+    "- Active listening takes priority over factual breadth.\n"
+    "- First, reflect and validate the caller's emotional state in plain language.\n"
+    "- Then provide one short supportive bridge sentence.\n"
+    "- End with one gentle check-in question.\n"
+    "- Ask exactly one question in this mode.\n"
+    "- Do not use numbered lists or multi-part instructions in this mode.\n"
+    "- Keep this to 2-3 short sentences unless immediate safety escalation is required."
+)
+
+INFO_GATHERING_CONTRACT = (
+    "\n\nTurn strategy: info_gathering_no_rag\n"
+    "- Active listening takes priority.\n"
+    "- First, briefly validate what the caller shared.\n"
+    "- Ask exactly one targeted clarifying question needed for safer next-step guidance.\n"
+    "- Optional: one short phrase on why that detail helps keep them safe.\n"
+    "- Ask exactly one question in this mode.\n"
+    "- Do not use numbered lists in this mode.\n"
+    "- Avoid broad factual dumping in this mode."
+)
+
+UNDERSTANDING_CHECK_CONTRACT = (
+    "\n\nTurn strategy: understanding_check_no_rag\n"
+    "- Briefly paraphrase the caller-relevant meaning of the prior assistant turn in plain language.\n"
+    "- Break that meaning into 1-2 short clauses, then ask one understanding-check question per clause.\n"
+    "- Keep wording concrete and simple; avoid jargon and long lists.\n"
+    "- Do not introduce new factual content in this mode.\n"
+    "- Ask no more than two short clause-level questions total.\n"
+    "- Keep total output to at most 3 short sentences."
+)
+
+EXPLANATION_CONTRACT = (
+    "\n\nTurn strategy: explanation_rag_optional\n"
+    "- The caller signaled they may not understand prior guidance.\n"
+    "- Re-explain the key point in simpler language with one concrete example when useful.\n"
+    "- Keep it short and calm, then ask one check-back question to confirm understanding.\n"
+    "- Ask exactly one question in this mode and avoid numbered lists unless caller explicitly requests steps.\n"
+    "- If RAG context is available and relevant, use it to improve clarity without overloading detail."
+)
+
 
 @dataclass(frozen=True)
 class TurnConstruction:
@@ -112,9 +162,13 @@ class TurnConstruction:
     rag_used: bool
 
 
-async def generate(messages: list[dict]) -> str:
+async def generate(
+    messages: list[dict],
+    strategy: Optional[str] = None,
+    rag_allowed: Optional[bool] = None,
+) -> str:
     """Send *messages* to Ollama and return the assistant reply as a string."""
-    turn = await _construct_turn(messages)
+    turn = await _construct_turn(messages, strategy=strategy, rag_allowed=rag_allowed)
     backend = get_backend(settings.llm_provider)
     payload = backend.payload(turn.messages, stream=False)
 
@@ -127,9 +181,13 @@ async def generate(messages: list[dict]) -> str:
         return backend.extract_text(resp.json())
 
 
-async def generate_stream(messages: list[dict]) -> AsyncIterator[str]:
+async def generate_stream(
+    messages: list[dict],
+    strategy: Optional[str] = None,
+    rag_allowed: Optional[bool] = None,
+) -> AsyncIterator[str]:
     """Stream response tokens from Ollama one chunk at a time."""
-    turn = await _construct_turn(messages)
+    turn = await _construct_turn(messages, strategy=strategy, rag_allowed=rag_allowed)
     backend = get_backend(settings.llm_provider)
     payload = backend.payload(turn.messages, stream=True)
 
@@ -148,17 +206,41 @@ async def generate_stream(messages: list[dict]) -> AsyncIterator[str]:
                     break
 
 
-async def _construct_turn(messages: list[dict]) -> TurnConstruction:
+async def _construct_turn(
+    messages: list[dict],
+    strategy: Optional[str] = None,
+    rag_allowed: Optional[bool] = None,
+) -> TurnConstruction:
     history = _normalize_history(messages)
     latest_query = _latest_user_message(history)
 
     prompt = f"{HARM_REDUCTION_SYSTEM_PROMPT}{SAFETY_GUARDRAILS}{DETERMINISTIC_TURN_POLICY}"
+    if strategy == TurnStrategy.RAPPORT_BUILDING.value:
+        prompt = f"{prompt}{RAPPORT_LISTENING_CONTRACT}"
+    elif strategy == TurnStrategy.INFO_GATHERING_NO_RAG.value:
+        prompt = f"{prompt}{INFO_GATHERING_CONTRACT}"
+    elif strategy == TurnStrategy.UNDERSTANDING_CHECK_NO_RAG.value:
+        prompt = f"{prompt}{UNDERSTANDING_CHECK_CONTRACT}"
+    elif strategy == TurnStrategy.EXPLANATION_RAG_OPTIONAL.value:
+        prompt = f"{prompt}{EXPLANATION_CONTRACT}"
+
     if settings.transfer_services_enabled:
         services_block = transfer_services.build_prompt_block()
         if services_block:
             prompt = f"{prompt}\n\n{services_block}"
+
     rag_used = False
-    if settings.rag_enabled:
+    should_use_rag = bool(settings.rag_enabled)
+    if rag_allowed is False:
+        should_use_rag = False
+    if strategy in {
+        TurnStrategy.RAPPORT_BUILDING.value,
+        TurnStrategy.INFO_GATHERING_NO_RAG.value,
+        TurnStrategy.UNDERSTANDING_CHECK_NO_RAG.value,
+    }:
+        should_use_rag = False
+
+    if should_use_rag:
         prompt = f"{prompt}{RAG_GROUNDING_RULES}"
         if latest_query:
             result = await asyncio.to_thread(rag.retrieve, latest_query)
