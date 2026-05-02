@@ -112,6 +112,7 @@ class _WhisperBackend(STTBackend):
         *,
         fallback_used: bool,
         failure_reason: str = "",
+        audio_duration_s: float = 0.0,
     ) -> TranscriptionResult:
         language_confidence = float(getattr(info, "language_probability", 0.0) or 0.0)
         return TranscriptionResult(
@@ -123,12 +124,14 @@ class _WhisperBackend(STTBackend):
             backend_name="faster-whisper",
             fallback_used=fallback_used,
             failure_reason=failure_reason,
+            audio_duration_s=audio_duration_s,
         )
 
     def transcribe(self, audio: np.ndarray, language: Optional[str]) -> TranscriptionResult:
         model = self._load()
         best_result: Optional[TranscriptionResult] = None
         last_error: Optional[Exception] = None
+        audio_duration_s = len(audio) / settings.audio_sample_rate_whisper
 
         for attempt in self._build_attempts(language):
             try:
@@ -146,7 +149,9 @@ class _WhisperBackend(STTBackend):
                 continue
 
             text = " ".join(seg.text.strip() for seg in segments).strip()
-            result = self._make_result(text, info, fallback_used=attempt.fallback_used)
+            result = self._make_result(
+                text, info, fallback_used=attempt.fallback_used, audio_duration_s=audio_duration_s
+            )
             if best_result is None or result.transcript_quality_score > best_result.transcript_quality_score:
                 best_result = result
 
@@ -164,7 +169,7 @@ class _WhisperBackend(STTBackend):
         if last_error is not None:
             raise last_error
 
-        return TranscriptionResult(failure_reason="no_speech")
+        return TranscriptionResult(failure_reason="no_speech", audio_duration_s=audio_duration_s)
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +239,7 @@ class _SherpaBackend(STTBackend):
         text = stream.result.text.strip()
         quality = _quality_score(text)
         failure_reason = ""
+        audio_duration_s = len(audio) / settings.audio_sample_rate_whisper
         if not text:
             failure_reason = "no_speech"
         elif (
@@ -251,6 +257,7 @@ class _SherpaBackend(STTBackend):
             backend_name="sherpa-onnx",
             fallback_used=True,
             failure_reason=failure_reason,
+            audio_duration_s=audio_duration_s,
         )
 
 

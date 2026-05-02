@@ -47,6 +47,20 @@ def test_system_prompt_mentions_multilingual() -> None:
     assert "multilingual" in llm_service.HARM_REDUCTION_SYSTEM_PROMPT.lower()
 
 
+def test_system_prompt_mentions_scope_boundary_and_crisis_routing() -> None:
+    """The system prompt should define scope boundaries and crisis routing details."""
+    prompt = llm_service.HARM_REDUCTION_SYSTEM_PROMPT.lower()
+    assert "outside harm reduction support" in prompt
+    assert "988" in llm_service.HARM_REDUCTION_SYSTEM_PROMPT
+
+
+def test_safety_guardrails_include_anti_fabrication_rule() -> None:
+    """Safety guardrails should explicitly forbid fabricated claims."""
+    guardrails = llm_service.SAFETY_GUARDRAILS.lower()
+    assert "never invent facts" in guardrails
+    assert "uncertain" in guardrails
+
+
 @pytest.mark.asyncio
 async def test_generate_includes_rag_context_when_enabled() -> None:
     mock_response = MagicMock()

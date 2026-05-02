@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     whisper_fallback_beam_size: int = 1
     stt_min_text_characters: int = 2
     stt_min_quality_score: float = 0.25
+    # STT Confidence thresholding for low-confidence handling
+    # Confidence below this threshold triggers confirmation flow (0.0-1.0)
+    stt_low_confidence_threshold: float = 0.75
+    # Maximum retry attempts for low-confidence confirmations
+    stt_max_retries: int = 3
     # "whisper" is the primary backend; set to "sherpa" to use Sherpa-ONNX directly.
     stt_primary_backend: Literal["whisper", "sherpa"] = "whisper"
     # Fall back to Sherpa-ONNX when all Whisper decode attempts are exhausted.

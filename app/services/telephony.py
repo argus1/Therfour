@@ -18,8 +18,8 @@ import numpy as np
 from scipy.signal import resample_poly
 
 from app.core.config import settings
-from app.models.schemas import TTSSynthesisStatus
 from app.services import llm, stt, tts
+from app.services.stt_confidence import LowConfidenceHandler
 from app.services.tts import PIPER_SAMPLE_RATE
 from app.services.vad import StreamingSpeechDetector, silero_vad_available
 
@@ -78,6 +78,10 @@ class CallSession:
         self._loop = asyncio.get_event_loop()
         self._speech_detector: Optional[StreamingSpeechDetector] = None
         self._stt_backend_sticky: Optional[stt.STTBackendName] = None
+        # Low-confidence confirmation state
+        self._in_confirmation_flow: bool = False
+        self._confirmation_retry_count: int = 0
+        self._pending_low_confidence_text: str = ""
 
         if settings.vad_enabled:
             if silero_vad_available():
@@ -214,50 +218,146 @@ class CallSession:
             text,
         )
 
-        # ── 3. LLM ────────────────────────────────────────────────────────────
+        # ── 2.5. Handle low-confidence confirmation flow ───────────────────────
+        if self._in_confirmation_flow:
+            await self._handle_confirmation_response(text, stt_result)
+            return
+
+        # ── 3. Check for low confidence (before LLM) ──────────────────────────
+        if LowConfidenceHandler.is_low_confidence(stt_result):
+            await self._enter_confirmation_flow(stt_result)
+            return
+
+        # ── 4. LLM ────────────────────────────────────────────────────────────
         self._conversation.append({"role": "user", "content": text})
         reply = await llm.generate(self._conversation)
         self._conversation.append({"role": "assistant", "content": reply})
         logger.info("LLM reply: %s", reply)
 
-        # ── 4. TTS ────────────────────────────────────────────────────────────
-        tts_result = await tts.synthesize(reply, language=stt_result.language)
-
-        # Log TTS metadata regardless of outcome — distinguishes TTS failures
-        # from STT and LLM failures in structured logs.
-        logger.info(
-            "TTS synthesis: status=%s backend=%s voice=%s lang=%s "
-            "latency_ms=%d audio_ms=%d bytes=%d fallback=%s%s",
-            tts_result.status.value,
-            tts_result.backend_name,
-            tts_result.voice_used,
-            tts_result.language,
-            tts_result.synthesis_latency_ms,
-            tts_result.audio_duration_ms,
-            tts_result.audio_bytes,
-            tts_result.fallback_used,
-            f" failure_reason={tts_result.failure_reason.value}"
-            if tts_result.failure_reason else "",
-        )
-
-        if not tts_result.ok:
-            # TTS failed on all backends — log and drop turn rather than
-            # sending silence to the caller.
-            logger.error(
-                "Dropping turn: TTS failed (reason=%s)",
-                tts_result.failure_reason.value if tts_result.failure_reason else "unknown",
-            )
+        # ── 5. TTS ────────────────────────────────────────────────────────────
+        # The TTS service returns float32 PCM samples at PIPER_SAMPLE_RATE.
+        try:
+            tts_audio = await tts.synthesize(reply, language=stt_result.language)
+        except Exception:
+            logger.exception("Dropping turn: TTS synthesis failed")
             return
 
-        if tts_result.status == TTSSynthesisStatus.fallback_used:
-            logger.warning(
-                "TTS fallback was used (primary=%s fallback=%s)",
-                tts_result.backend_name,
-                "piper",
-            )
+        logger.info(
+            "TTS synthesis completed: lang=%s samples=%d",
+            stt_result.language,
+            len(tts_audio),
+        )
 
-        # ── 5. Send audio to caller ───────────────────────────────────────────
-        await self._send_audio(tts_result.audio)
+        # ── 6. Send audio to caller ───────────────────────────────────────────
+        await self._send_audio(tts_audio)
+
+    # ── Low-confidence confirmation flow ──────────────────────────────────────
+
+    async def _enter_confirmation_flow(self, stt_result: stt.TranscriptionResult) -> None:
+        """Enter confirmation flow for low-confidence STT result."""
+        logger.info(
+            "Low-confidence STT result (confidence: %.2f, threshold: %.2f). "
+            "Entering confirmation flow.",
+            stt_result.language_confidence,
+            settings.stt_low_confidence_threshold,
+        )
+        
+        self._in_confirmation_flow = True
+        self._confirmation_retry_count = 0
+        self._pending_low_confidence_text = stt_result.text
+        
+        # Generate confirmation prompt
+        prompt = await LowConfidenceHandler.generate_confirmation_prompt(stt_result)
+        logger.info("Confirmation prompt: %s", prompt.prompt)
+        
+        # Synthesize and send confirmation prompt
+        try:
+            tts_audio = await tts.synthesize(prompt.prompt, language=stt_result.language)
+            await self._send_audio(tts_audio)
+        except Exception:
+            logger.exception("Failed to synthesize confirmation prompt")
+
+    async def _handle_confirmation_response(
+        self, response_text: str, response_result: stt.TranscriptionResult
+    ) -> None:
+        """Handle user's response to confirmation prompt (yes/no)."""
+        logger.info("Confirmation response: %s", response_text)
+        
+        if self._is_affirmative_response(response_text):
+            # User confirmed - process the original transcript
+            logger.info("User confirmed low-confidence transcript")
+            self._in_confirmation_flow = False
+            self._confirmation_retry_count = 0
+            
+            # Add the original (confirmed) text to conversation and process with RAG
+            self._conversation.append({"role": "user", "content": self._pending_low_confidence_text})
+            reply = await llm.generate(self._conversation)
+            self._conversation.append({"role": "assistant", "content": reply})
+            logger.info("LLM reply (after confirmation): %s", reply)
+            
+            # Synthesize and send reply
+            try:
+                tts_audio = await tts.synthesize(reply, language=response_result.language)
+                await self._send_audio(tts_audio)
+            except Exception:
+                logger.exception("Failed to synthesize LLM reply after confirmation")
+        
+        elif self._is_negative_response(response_text):
+            # User denied - check if we should retry or change topic
+            self._confirmation_retry_count += 1
+            logger.info("User denied confirmation (retry %d/%d)", 
+                       self._confirmation_retry_count, 
+                       settings.stt_max_retries)
+            
+            if LowConfidenceHandler.should_change_topic(self._confirmation_retry_count):
+                # Max retries exceeded - allow topic change
+                self._in_confirmation_flow = False
+                self._confirmation_retry_count = 0
+                self._pending_low_confidence_text = ""
+                
+                prompt = LowConfidenceHandler.get_retry_prompt(self._confirmation_retry_count)
+                logger.info("Max retries exceeded. Topic change prompt: %s", prompt)
+                
+                try:
+                    tts_audio = await tts.synthesize(prompt, language=response_result.language)
+                    await self._send_audio(tts_audio)
+                except Exception:
+                    logger.exception("Failed to synthesize topic change prompt")
+            else:
+                # Allow retry
+                prompt = LowConfidenceHandler.get_retry_prompt(self._confirmation_retry_count)
+                logger.info("Requesting retry: %s", prompt)
+                
+                try:
+                    tts_audio = await tts.synthesize(prompt, language=response_result.language)
+                    await self._send_audio(tts_audio)
+                except Exception:
+                    logger.exception("Failed to synthesize retry prompt")
+        else:
+            # Unclear response - ask again
+            logger.info("Unclear response during confirmation: %s", response_text)
+            try:
+                tts_audio = await tts.synthesize(
+                    "I didn't catch that. Please say yes or no.",
+                    language=response_result.language,
+                )
+                await self._send_audio(tts_audio)
+            except Exception:
+                logger.exception("Failed to synthesize clarification prompt")
+
+    @staticmethod
+    def _is_affirmative_response(text: str) -> bool:
+        """Check if response is affirmative (yes, yeah, yep, etc.)."""
+        text_lower = text.lower().strip()
+        affirmative_words = {"yes", "yeah", "yep", "sure", "correct", "right", "uh-huh"}
+        return any(word in text_lower for word in affirmative_words)
+
+    @staticmethod
+    def _is_negative_response(text: str) -> bool:
+        """Check if response is negative (no, nope, etc.)."""
+        text_lower = text.lower().strip()
+        negative_words = {"no", "nope", "nah", "incorrect", "wrong", "uh-uh"}
+        return any(word in text_lower for word in negative_words)
 
     def _finish_turn_processing(self) -> None:
         self._processing = False

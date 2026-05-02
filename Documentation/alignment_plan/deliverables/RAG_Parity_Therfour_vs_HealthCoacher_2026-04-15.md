@@ -227,3 +227,48 @@ HealthCoacher demonstrates the target model:
 - answer-style controls that prevent scaffolding leakage
 
 Therfour should first establish the retrieval contract and context injection path, then iterate on chunking quality and grounding evaluation sets.
+
+## Addendum: Prompt Boundary and Safety-Orchestration Review (2026-04-30)
+
+This addendum captures a focused review of Therfour's active RAG prompt template and orchestration layer after initial parity analysis.
+
+### Findings
+
+1. Boundary definition was partially present but incomplete.
+
+- Existing prompt covered harm-reduction role and caller safety, but did not explicitly require refusing out-of-scope requests unrelated to harm reduction.
+
+2. Safety rails were strong on refusal intent but weak on anti-fabrication.
+
+- Existing guardrails prohibited dangerous coaching and jailbreak attempts.
+- The prompt did not explicitly instruct the model to avoid making up unknown medical or service details.
+
+3. Crisis escalation language was present but could be more concrete.
+
+- Prompt referenced emergency services (911 in North America), but did not include non-immediate crisis support routing.
+
+4. Orchestration order was deterministic and appropriate.
+
+- Turn policy enforces safety-first sequence before advice and before RAG usage.
+- RAG grounding policy correctly prohibits exposing retrieval internals to callers.
+
+### High-Priority Remediations Applied
+
+The following high-priority items were implemented in runtime prompt construction:
+
+1. Added explicit out-of-scope boundary handling.
+
+- The system prompt now instructs the model to decline requests outside harm reduction scope and redirect back to safety-oriented support.
+
+2. Added anti-fabrication guardrail.
+
+- Safety guardrails now require the model to avoid inventing facts and to briefly acknowledge uncertainty while giving safest practical next steps.
+
+3. Added crisis-line specificity.
+
+- Prompt now references 988 for suicide and crisis support (where available), alongside 911 for immediate danger.
+
+### Validation Status
+
+- Unit tests for prompt behavior were updated to assert the new boundary and safety language.
+- Existing deterministic turn and RAG grounding checks remain in place.
