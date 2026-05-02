@@ -153,6 +153,8 @@ def test_transfer_harness_dry_run_returns_twiml(client: TestClient, monkeypatch)
     body = resp.json()
     assert body["target"] == "988"
     assert body["target_kind"] == "number"
+    assert body["call_control_protocol"] == "twilio"
+    assert body["call_control_payload"] == body["twiml"]
     assert body["executed_live_update"] is False
     assert "<Dial>988</Dial>" in body["twiml"]
 
@@ -180,6 +182,8 @@ def test_transfer_harness_live_update_calls_twilio(client: TestClient, monkeypat
 
     assert resp.status_code == 200
     body = resp.json()
+    assert body["call_control_protocol"] == "twilio"
+    assert body["call_control_payload"] == body["twiml"]
     assert body["executed_live_update"] is True
     assert body["call_sid"] == "CA123"
     assert called and called[0][0] == "CA123"

@@ -371,7 +371,10 @@ class TransferHarnessResponse(BaseModel):
 
     target_kind: Literal["number", "sip"]
     target: str
-    twiml: str
+    call_control_protocol: Literal["twilio", "asterisk_ari"] = "twilio"
+    call_control_payload: str
+    # Backward-compatible alias for existing Twilio harness clients.
+    twiml: str = ""
     executed_live_update: bool
     call_sid: str = ""
 

@@ -234,6 +234,8 @@ async def transfer_harness(payload: TransferHarnessRequest) -> TransferHarnessRe
     return TransferHarnessResponse(
         target_kind=payload.target_kind,
         target=payload.target,
+        call_control_protocol="twilio",
+        call_control_payload=twiml,
         twiml=twiml,
         executed_live_update=executed_live_update,
         call_sid=payload.call_sid or "",
