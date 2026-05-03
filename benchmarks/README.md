@@ -142,3 +142,7 @@ BENCHMARK_RUNS=1 python benchmarks/tts_comparison_benchmark.py
 ```
 
 The raw benchmark JSON includes `cuda_compatibility` and `f5_cuda_local/*` summary keys.
+
+TTS benchmark artifacts are written under:
+
+- `benchmarks/benchmarks/results/TTS/CUDA/`

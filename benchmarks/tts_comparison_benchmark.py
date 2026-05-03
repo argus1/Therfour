@@ -5,11 +5,11 @@ Run from the repo root with the venv active:
 
 Outputs
 -------
-- benchmarks/results/TTS_benchmark_raw_<timestamp>.json
-- benchmarks/results/MOS_easy.wav
-- benchmarks/results/MOS_moderate.wav
-- benchmarks/results/MOS_difficult.wav
-- benchmarks/results/MOS_combined.wav  (all three with 2 s silence gaps)
+- benchmarks/benchmarks/results/TTS/CUDA/TTS_benchmark_raw_<timestamp>.json
+- benchmarks/benchmarks/results/TTS/CUDA/MOS_easy.wav
+- benchmarks/benchmarks/results/TTS/CUDA/MOS_moderate.wav
+- benchmarks/benchmarks/results/TTS/CUDA/MOS_difficult.wav
+- benchmarks/benchmarks/results/TTS/CUDA/MOS_combined.wav  (all three with 2 s silence gaps)
 
 F5-TTS is contacted at the endpoint configured in .env (F5_TTS_ENDPOINT,
 default http://localhost:8880/synthesize).  When unavailable, synthesis
@@ -42,7 +42,7 @@ except Exception:  # pragma: no cover - fallback for direct script execution con
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 REPO_ROOT = Path(__file__).resolve().parent.parent
-RESULTS_DIR = REPO_ROOT / "benchmarks" / "results"
+RESULTS_DIR = REPO_ROOT / "benchmarks" / "benchmarks" / "results" / "TTS" / "CUDA"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 _PIPER_MODEL_CANDIDATES = [
@@ -64,7 +64,10 @@ F5_MLX_STEPS = int(os.environ.get("F5_MLX_STEPS", "8"))
 F5_MLX_REF_AUDIO_PATH = str(
     REPO_ROOT
     / "benchmarks"
+    / "benchmarks"
     / "results"
+    / "TTS"
+    / "CUDA"
     / "MOS_moderate.wav"
 )
 # Transcript of MOS_moderate.wav (Piper synthesis of the former moderate passage)

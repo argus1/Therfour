@@ -1,0 +1,174 @@
+{
+  "timestamp_utc": "20260503T203827Z",
+  "piper_model": "/home/argus/Documents/Therfour/models/piper/en_US-lessac-medium.onnx",
+  "f5_endpoint": "http://localhost:8880/synthesize",
+  "f5_voice": "en_default",
+  "benchmark_runs": 1,
+  "f5_mlx_available": false,
+  "f5_mlx_probe_note": "f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx",
+  "f5_http_available": false,
+  "f5_http_probe_note": "F5-TTS HTTP not available at http://localhost:8880/synthesize",
+  "summary": {
+    "piper/easy": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 807.3919369999203,
+      "p95_ms": 807.3919369999203,
+      "mean_ms": 807.3919369999203,
+      "min_ms": 807.3919369999203,
+      "max_ms": 807.3919369999203,
+      "failure_reasons": []
+    },
+    "piper/moderate": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 983.0252079991624,
+      "p95_ms": 983.0252079991624,
+      "mean_ms": 983.0252079991624,
+      "min_ms": 983.0252079991624,
+      "max_ms": 983.0252079991624,
+      "failure_reasons": []
+    },
+    "piper/difficult": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 1172.3650379972241,
+      "p95_ms": 1172.3650379972241,
+      "mean_ms": 1172.3650379972241,
+      "min_ms": 1172.3650379972241,
+      "max_ms": 1172.3650379972241,
+      "failure_reasons": []
+    },
+    "f5/easy": {
+      "success_count": 0,
+      "failure_count": 0,
+      "failure_rate": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": []
+    },
+    "f5/moderate": {
+      "success_count": 0,
+      "failure_count": 0,
+      "failure_rate": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": []
+    },
+    "f5/difficult": {
+      "success_count": 0,
+      "failure_count": 0,
+      "failure_rate": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": []
+    },
+    "f5_mlx/easy": {
+      "success_count": 0,
+      "failure_count": 1,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "f5-tts-mlx not available: f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx"
+      ]
+    },
+    "f5_mlx/moderate": {
+      "success_count": 0,
+      "failure_count": 1,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "f5-tts-mlx not available: f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx"
+      ]
+    },
+    "f5_mlx/difficult": {
+      "success_count": 0,
+      "failure_count": 1,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "f5-tts-mlx not available: f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx"
+      ]
+    }
+  },
+  "results": [
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": 807.3919369999203,
+      "audio_bytes": 457260,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "f5-tts-mlx not available: f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": 983.0252079991624,
+      "audio_bytes": 590380,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "f5-tts-mlx not available: f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx"
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": 1172.3650379972241,
+      "audio_bytes": 679468,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "f5-tts-mlx not available: f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx"
+    }
+  ]
+}

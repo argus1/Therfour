@@ -1,0 +1,274 @@
+{
+  "timestamp_utc": "20260503T205839Z",
+  "piper_model": "/home/argus/Documents/Therfour/models/piper/en_US-lessac-medium.onnx",
+  "f5_endpoint": "http://localhost:8880/synthesize",
+  "f5_voice": "en_default",
+  "benchmark_runs": 1,
+  "f5_any_available": true,
+  "f5_any_probe_note": "local f5-tts CUDA ready (model=F5TTS_v1_Base, device=cuda)",
+  "cuda_compatibility": {
+    "timestamp_utc": "2026-05-03T20:58:43.732454+00:00",
+    "python_version": "3.12.13",
+    "platform": "Linux-6.8.0-110-generic-x86_64-with-glibc2.35",
+    "cuda_visible_devices": null,
+    "ld_library_path": "/usr/local/cuda/lib64::/usr/local/cuda-12.2/lib64",
+    "nvidia_smi": {
+      "present": true,
+      "error": null,
+      "driver_version": "550.163.01",
+      "cuda_runtime_version": "12.4",
+      "gpus": [
+        {
+          "name": "NVIDIA GeForce RTX 2080 Ti",
+          "driver_version": "550.163.01"
+        }
+      ]
+    },
+    "cuda_driver_api": {
+      "libcuda_load_ok": true,
+      "libcuda_error": null,
+      "cuinit_code": 0,
+      "driver_api_version": 12040
+    },
+    "torch": {
+      "installed": true,
+      "error": null,
+      "version": "2.5.1+cu124",
+      "cuda_built_version": "12.4",
+      "cuda_available": true,
+      "cuda_device_count": 1,
+      "cuda_device_name": "NVIDIA GeForce RTX 2080 Ti"
+    },
+    "compatible_for_local_cuda_f5": true,
+    "notes": []
+  },
+  "f5_cuda_available": true,
+  "f5_cuda_probe_note": "local f5-tts CUDA ready (model=F5TTS_v1_Base, device=cuda)",
+  "f5_mlx_available": false,
+  "f5_mlx_probe_note": "f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx",
+  "f5_http_available": false,
+  "f5_http_probe_note": "F5-TTS HTTP not available at http://localhost:8880/synthesize",
+  "summary": {
+    "piper/easy": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 494.06394199991155,
+      "p95_ms": 494.06394199991155,
+      "mean_ms": 494.06394199991155,
+      "min_ms": 494.06394199991155,
+      "max_ms": 494.06394199991155,
+      "failure_reasons": []
+    },
+    "piper/moderate": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 870.0640330000624,
+      "p95_ms": 870.0640330000624,
+      "mean_ms": 870.0640330000624,
+      "min_ms": 870.0640330000624,
+      "max_ms": 870.0640330000624,
+      "failure_reasons": []
+    },
+    "piper/difficult": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 1065.2717149999944,
+      "p95_ms": 1065.2717149999944,
+      "mean_ms": 1065.2717149999944,
+      "min_ms": 1065.2717149999944,
+      "max_ms": 1065.2717149999944,
+      "failure_reasons": []
+    },
+    "f5/easy": {
+      "success_count": 0,
+      "failure_count": 0,
+      "failure_rate": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": []
+    },
+    "f5/moderate": {
+      "success_count": 0,
+      "failure_count": 0,
+      "failure_rate": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": []
+    },
+    "f5/difficult": {
+      "success_count": 0,
+      "failure_count": 0,
+      "failure_rate": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": []
+    },
+    "f5_mlx/easy": {
+      "success_count": 0,
+      "failure_count": 1,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "f5-tts-mlx not available: f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx"
+      ]
+    },
+    "f5_mlx/moderate": {
+      "success_count": 0,
+      "failure_count": 1,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "f5-tts-mlx not available: f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx"
+      ]
+    },
+    "f5_mlx/difficult": {
+      "success_count": 0,
+      "failure_count": 1,
+      "failure_rate": 1.0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "mean_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "failure_reasons": [
+        "f5-tts-mlx not available: f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx"
+      ]
+    },
+    "f5_cuda_local/easy": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 10438.166592000016,
+      "p95_ms": 10438.166592000016,
+      "mean_ms": 10438.166592000016,
+      "min_ms": 10438.166592000016,
+      "max_ms": 10438.166592000016,
+      "failure_reasons": []
+    },
+    "f5_cuda_local/moderate": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 2725.891087999912,
+      "p95_ms": 2725.891087999912,
+      "mean_ms": 2725.891087999912,
+      "min_ms": 2725.891087999912,
+      "max_ms": 2725.891087999912,
+      "failure_reasons": []
+    },
+    "f5_cuda_local/difficult": {
+      "success_count": 1,
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "p50_ms": 4239.372397000011,
+      "p95_ms": 4239.372397000011,
+      "mean_ms": 4239.372397000011,
+      "min_ms": 4239.372397000011,
+      "max_ms": 4239.372397000011,
+      "failure_reasons": []
+    }
+  },
+  "results": [
+    {
+      "backend": "piper",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": 494.06394199991155,
+      "audio_bytes": 445484,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "f5-tts-mlx not available: f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx"
+    },
+    {
+      "backend": "f5_cuda_local",
+      "passage_id": "easy",
+      "run_index": 0,
+      "latency_ms": 10438.166592000016,
+      "audio_bytes": 362540,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "piper",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": 870.0640330000624,
+      "audio_bytes": 587308,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "f5-tts-mlx not available: f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx"
+    },
+    {
+      "backend": "f5_cuda_local",
+      "passage_id": "moderate",
+      "run_index": 0,
+      "latency_ms": 2725.891087999912,
+      "audio_bytes": 488492,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "piper",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": 1065.2717149999944,
+      "audio_bytes": 659500,
+      "success": true,
+      "error": null
+    },
+    {
+      "backend": "f5_mlx",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": null,
+      "audio_bytes": null,
+      "success": false,
+      "error": "f5-tts-mlx not available: f5-tts-mlx not installed \u2014 run: pip install f5-tts-mlx"
+    },
+    {
+      "backend": "f5_cuda_local",
+      "passage_id": "difficult",
+      "run_index": 0,
+      "latency_ms": 4239.372397000011,
+      "audio_bytes": 581132,
+      "success": true,
+      "error": null
+    }
+  ]
+}
