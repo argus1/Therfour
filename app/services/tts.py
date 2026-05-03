@@ -17,7 +17,7 @@ import wave
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx
 import numpy as np
@@ -118,7 +118,7 @@ class TTSSynthesisObservability:
     synthesis_latency_ms: int
     audio_bytes: int
     audio_duration_ms: int
-    failure_reason: str = ""
+    failure_reason: "TTSFailureReason" = ""
 
     @property
     def ok(self) -> bool:
@@ -335,6 +335,46 @@ def _resolve_observed_backend_name(synthesizer: SpeechSynthesizer) -> str:
 
 def _resolve_observed_fallback_used(synthesizer: SpeechSynthesizer) -> bool:
     return bool(getattr(synthesizer, "last_call_fallback_used", False))
+
+
+TTSFailureReason = Literal[
+    "",
+    "empty_text",
+    "binary_not_found",
+    "timeout",
+    "backend_http_error",
+    "invalid_response",
+    "empty_output",
+    "synthesis_failed",
+    "unsupported",
+    "unknown",
+]
+
+
+def _classify_tts_exception(exc: Exception) -> TTSFailureReason:
+    if isinstance(exc, EmptyOutputError):
+        message = str(exc).lower()
+        if "empty text" in message:
+            return "empty_text"
+        return "empty_output"
+
+    if isinstance(exc, UnsupportedError):
+        message = str(exc).lower()
+        if "binary not found" in message:
+            return "binary_not_found"
+        if "timed out" in message:
+            return "timeout"
+        if "http" in message:
+            return "backend_http_error"
+        if "base64" in message or "json response" in message or "sample width" in message:
+            return "invalid_response"
+        if "exited with code" in message or "generate() failed" in message:
+            return "synthesis_failed"
+        if "unsupported" in message:
+            return "unsupported"
+        return "synthesis_failed"
+
+    return "unknown"
 
 
 def _normalize_voice_id(voice: str | None) -> str:
@@ -683,5 +723,5 @@ async def synthesize_with_observability(
             synthesis_latency_ms=latency_ms,
             audio_bytes=0,
             audio_duration_ms=0,
-            failure_reason=exc.__class__.__name__,
+            failure_reason=_classify_tts_exception(exc),
         )

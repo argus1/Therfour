@@ -205,3 +205,35 @@ async def test_session_sticky_fallback_remains_on_fallback_after_first_failure()
     assert fallback.calls == 2
     assert len(first) == tts_service.PIPER_SAMPLE_RATE
     assert len(second) == tts_service.PIPER_SAMPLE_RATE
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (tts_service.EmptyOutputError("Cannot synthesize empty text"), "empty_text"),
+        (tts_service.EmptyOutputError("Piper produced no audio output"), "empty_output"),
+        (tts_service.UnsupportedError("Piper binary not found"), "binary_not_found"),
+        (tts_service.UnsupportedError("F5-TTS request timed out"), "timeout"),
+        (tts_service.UnsupportedError("F5-TTS returned HTTP 503"), "backend_http_error"),
+        (tts_service.UnsupportedError("F5-TTS JSON audio payload is not valid base64"), "invalid_response"),
+        (tts_service.UnsupportedError("Piper exited with code 1"), "synthesis_failed"),
+        (RuntimeError("unexpected"), "unknown"),
+    ],
+)
+def test_classify_tts_exception_maps_to_failure_taxonomy(exc, expected) -> None:
+    assert tts_service._classify_tts_exception(exc) == expected
+
+
+@pytest.mark.asyncio
+async def test_synthesize_with_observability_reports_taxonomy_reason(monkeypatch) -> None:
+    async def _raise_timeout(*args, **kwargs):
+        raise tts_service.UnsupportedError("F5-TTS request timed out after 30 seconds")
+
+    monkeypatch.setattr(tts_service, "synthesize", _raise_timeout)
+
+    obs = await tts_service.synthesize_with_observability("hello", language="en")
+
+    assert obs.ok is False
+    assert obs.failure_reason == "timeout"
+    assert obs.audio_bytes == 0
+    assert obs.audio_duration_ms == 0
