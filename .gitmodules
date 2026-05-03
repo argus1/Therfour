@@ -1,0 +1,3 @@
+[submodule "third_party/f5-tts"]
+	path = third_party/f5-tts
+	url = https://github.com/swivid/f5-tts
