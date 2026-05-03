@@ -11,29 +11,24 @@ your infrastructure.
 ```mermaid
 flowchart TD
      Caller[Caller] --> Twilio[Twilio]
-     Twilio --> Inbound[/calls/inbound (TwiML)/]
-     Inbound --> Stream[WebSocket /calls/stream]
-     Stream --> CallSession
+     Twilio --> Inbound["/calls/inbound (TwiML)"]
+     Inbound --> Stream["WebSocket /calls/stream"]
 
-     subgraph CallSession[CallSession]
+     subgraph Session[CallSession]
           direction TB
-          Decode[μ-law/8 kHz -> float/16k]
-          STT[faster-whisper]
-          LLM[Ollama LLM]
-          TTS[Piper TTS]
-          Encode[float/22k -> μ-law/8 kHz]
+          Decode["mu-law 8 kHz -> float 16k"]
+          STT["faster-whisper"]
+          LLM["Ollama LLM"]
+          TTS["Piper TTS"]
+          Encode["float 22k -> mu-law 8 kHz"]
           Decode --> STT --> LLM --> TTS --> Encode
      end
 
-     STTHint[STT]
-     LLMHint[Local LLM (harm-reduction prompt)]
-     TTSHint[TTS]
-
-     STTHint -.-> STT
-     LLMHint -.-> LLM
-     TTSHint -.-> TTS
-
-     CallSession --> ReturnAudio[Audio sent back to caller]
+     Stream --> Decode
+     STTHint[STT] -.-> STT
+     LLMHint["Local LLM (harm-reduction prompt)"] -.-> LLM
+     TTSHint[TTS] -.-> TTS
+     Encode --> ReturnAudio[Audio sent back to caller]
 ```
 
 ## Tech stack
