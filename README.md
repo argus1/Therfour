@@ -13,25 +13,27 @@ Telephony support status:
 - Twilio Media Streams: production path
 - Asterisk/FreePBX (ARI ExternalMedia): compatibility work is pending (stubs only)
 
-```
-Caller ──► Twilio ──► /calls/inbound (TwiML)
-                         │
-                         ▼
-               WebSocket /calls/stream
-                         │
-          ┌──────────────▼──────────────┐
-          │        CallSession          │
-          │  μ-law/8 kHz ──► float/16k  │
-          │       faster-whisper        │  ◄── STT
-          │            │                │
-          │         Ollama LLM          │  ◄── Local LLM (harm-reduction prompt)
-          │            │                │
-          │         Piper TTS           │  ◄── TTS
-          │  float/22k ──► μ-law/8 kHz  │
-          └──────────────┬──────────────┘
-                         │
-                         ▼
-               Audio sent back to caller
+```mermaid
+flowchart TD
+  Caller[Caller] --> Twilio[Twilio]
+  Twilio --> Inbound["/calls/inbound (TwiML)"]
+  Inbound --> Stream["WebSocket /calls/stream"]
+
+  subgraph Session[CallSession]
+    direction TB
+    Decode["mu-law 8 kHz -> float 16k"]
+    STT["faster-whisper"]
+    LLM["Ollama LLM"]
+    TTS["Piper TTS"]
+    Encode["float 22k -> mu-law 8 kHz"]
+    Decode --> STT --> LLM --> TTS --> Encode
+  end
+
+  Stream --> Decode
+  STTHint[STT] -.-> STT
+  LLMHint["Local LLM (harm-reduction prompt)"] -.-> LLM
+  TTSHint[TTS] -.-> TTS
+  Encode --> ReturnAudio[Audio sent back to caller]
 ```
 
 ## Tech stack
@@ -188,6 +190,7 @@ swift test
 All settings can be overridden via environment variables or a `.env` file.
 See `.env.example` for the full list with descriptions.
 
+<<<<<<< HEAD
 ### Transfer routing (number + SIP)
 
 The call transfer flow supports emergency handoff (`911`, `988`) plus optional
@@ -383,3 +386,15 @@ git add .gitattributes models/llm/<your-model>.gguf
 | `RAG_WAITING_AUDIO_DELAY_S`     | `0.35`                                  | Delay before waiting audio starts                     |
 | `RAG_WAITING_AUDIO_ASSETS_DIR`  | `app/assets/waiting_audio`              | Waiting-audio asset directory                         |
 | `TURN_INTERRUPT_ENABLED`        | `true`                                  | Interrupt active assistant turn on caller speech      |
+=======
+| Variable            | Default                           | Description                               |
+| ------------------- | --------------------------------- | ----------------------------------------- |
+| `WHISPER_MODEL`     | `small`                           | faster-whisper model size                 |
+| `WHISPER_LANGUAGE`  | _(auto-detect)_                   | Pin transcription language                |
+| `PIPER_BINARY`      | `piper`                           | Path to the Piper executable              |
+| `PIPER_MODEL_PATH`  | `models/en_US-lessac-medium.onnx` | Piper voice model                         |
+| `OLLAMA_MODEL`      | `llama3.2:3b`                     | Ollama model tag                          |
+| `OLLAMA_BASE_URL`   | `http://localhost:11434`          | Ollama API base URL                       |
+| `SILENCE_TIMEOUT_S` | `1.5`                             | Seconds of silence before turn processing |
+| `PUBLIC_HOST`       | `localhost`                       | Hostname used in the TwiML `<Stream>` URL |
+>>>>>>> bc65abb (changed figure in readme)
