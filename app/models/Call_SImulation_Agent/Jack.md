@@ -3,3 +3,9 @@ Jack stood as an 17-year-old teen on a busy street in Los Angeles, wearing casua
 Jack's heroin use began a year ago. He described this behavior as a means to cope with the pain and neglect he experienced during his childhood as a victim of both physical and sexual abuse. The young actor's struggle with substance abuse reflects his vulnerable position growing up in Hollywood, where his personal issues intertwined with the industry's cultural influences.
 
 This character profile captures Jack's youth and his early attempts at substance use within the context of his growing up in Los Angeles during a time of emerging fashion trends.
+
+Quotes:
+
+"It felt like a subtle flower instead of a manipulative demon. That's the mystery of heroin".
+
+"that's not an ordinary piece of paper, that is a driver's license... it's a license to live"
