@@ -160,6 +160,7 @@ class CallSession:
         self._speech_detector: Optional[StreamingSpeechDetector] = None
         self._vad_backend_name: Literal["silero", "silence_timeout_fallback", "disabled"] = "disabled"
         self._stt_backend_sticky: Optional[stt.STTBackendName] = None
+        self._tts_synthesizer = tts.build_session_synthesizer()
         self._active_turn_task: Optional[asyncio.Task] = None
         # Low-confidence confirmation state
         self._in_confirmation_flow: bool = False
@@ -527,10 +528,19 @@ class CallSession:
 
         # ── 5. TTS ────────────────────────────────────────────────────────────
         # The TTS service returns float32 PCM samples at PIPER_SAMPLE_RATE.
-        try:
-            tts_audio = await tts.synthesize(spoken_reply, language=stt_result.language)
-        except Exception:
-            logger.exception("Dropping turn: TTS synthesis failed")
+        tts_obs = await tts.synthesize_with_observability(
+            spoken_reply,
+            language=stt_result.language,
+            synthesizer=self._tts_synthesizer,
+        )
+        if not tts_obs.ok or tts_obs.samples is None:
+            logger.error(
+                "Dropping turn: TTS synthesis failed backend=%s reason=%s latency_ms=%d fallback=%s",
+                tts_obs.backend_name,
+                tts_obs.failure_reason,
+                tts_obs.synthesis_latency_ms,
+                tts_obs.fallback_used,
+            )
             self._emit_canonical_turn(
                 message_type=CanonicalTurnMessageType.TURN_ERROR,
                 turn_id=turn_id,
@@ -558,11 +568,22 @@ class CallSession:
                             backend_name=settings.llm_provider,
                             strategy=strategy.value,
                         ),
+                        tts=CanonicalTurnProcessingTTS(
+                            backend_name=tts_obs.backend_name,
+                            voice_id=tts_obs.voice_id,
+                            output_format="mulaw",
+                            output_sample_rate_hz=settings.audio_sample_rate_twilio,
+                            fallback_used=tts_obs.fallback_used,
+                            synthesis_latency_ms=tts_obs.synthesis_latency_ms,
+                            audio_bytes=tts_obs.audio_bytes,
+                            audio_duration_ms=tts_obs.audio_duration_ms,
+                            failure_reason=tts_obs.failure_reason or "tts_failed",
+                        ),
                     ),
                     output=CanonicalTurnOutput(assistant_text=spoken_reply),
                     status=CanonicalTurnStatus(
                         state=CanonicalTurnState.PARTIAL,
-                        failure_reason="tts_failed",
+                        failure_reason=tts_obs.failure_reason or "tts_failed",
                         retryable=True,
                     ),
                 ),
@@ -570,8 +591,14 @@ class CallSession:
             )
             return
 
+        tts_audio = tts_obs.samples
+
         logger.info(
-            "TTS synthesis completed: lang=%s samples=%d",
+            "TTS synthesis completed: backend=%s fallback=%s latency_ms=%d bytes=%d lang=%s samples=%d",
+            tts_obs.backend_name,
+            tts_obs.fallback_used,
+            tts_obs.synthesis_latency_ms,
+            tts_obs.audio_bytes,
             stt_result.language,
             len(tts_audio),
         )
@@ -610,10 +637,14 @@ class CallSession:
                         strategy=strategy.value,
                     ),
                     tts=CanonicalTurnProcessingTTS(
-                        backend_name=settings.tts_backend,
-                        voice_id=settings.f5_tts_voice,
+                        backend_name=tts_obs.backend_name,
+                        voice_id=tts_obs.voice_id,
                         output_format="mulaw",
                         output_sample_rate_hz=settings.audio_sample_rate_twilio,
+                        fallback_used=tts_obs.fallback_used,
+                        synthesis_latency_ms=tts_obs.synthesis_latency_ms,
+                        audio_bytes=tts_obs.audio_bytes,
+                        audio_duration_ms=tts_obs.audio_duration_ms,
                     ),
                 ),
                 output=CanonicalTurnOutput(

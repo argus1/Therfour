@@ -560,8 +560,69 @@ async def test_run_turn_emits_canonical_turn_response(monkeypatch) -> None:
     assert response.payload.status.state.value == "ok"
     assert response.payload.processing.stt is not None
     assert response.payload.processing.tts is not None
+    assert response.payload.processing.tts.backend_name
+    assert response.payload.processing.tts.voice_id
+    assert response.payload.processing.tts.synthesis_latency_ms is not None
+    assert response.payload.processing.tts.audio_bytes is not None
+    assert response.payload.processing.tts.audio_duration_ms is not None
     assert response.envelope.idempotency_key
     assert request.envelope.idempotency_key == response.envelope.idempotency_key
+
+
+@pytest.mark.asyncio
+async def test_run_turn_emits_tts_failure_observability_in_turn_error(monkeypatch) -> None:
+    session = CallSession(_DummyWebSocket())
+    audio = np.zeros(6000, dtype=np.float32)
+
+    async def _fake_transcribe(_audio, language=None, preferred_backend=None):
+        return TranscriptionResult(
+            text="hello",
+            language="en",
+            confidence=0.95,
+            language_confidence=0.95,
+            transcript_quality_score=0.95,
+            backend_name="faster-whisper",
+            fallback_used=False,
+            failure_reason="",
+        )
+
+    async def _fake_generate(_conversation, strategy=None, rag_allowed=None):
+        return "I can help with that."
+
+    class _FailObs:
+        ok = False
+        samples = None
+        backend_name = "f5_http"
+        voice_id = "en_default"
+        fallback_used = True
+        synthesis_latency_ms = 42
+        audio_bytes = 0
+        audio_duration_ms = 0
+        failure_reason = "UnsupportedError"
+
+    async def _fake_tts_obs(_text, *, language=None, synthesizer=None, voice=None, options=None):
+        return _FailObs()
+
+    monkeypatch.setattr("app.services.telephony.stt.transcribe", _fake_transcribe)
+    monkeypatch.setattr("app.services.telephony.llm.generate", _fake_generate)
+    monkeypatch.setattr("app.services.telephony.tts.synthesize_with_observability", _fake_tts_obs)
+
+    await session._run_turn(audio)
+
+    error_events = [
+        event
+        for event in session._canonical_turn_events
+        if event.envelope.message_type.value == "turn.error"
+    ]
+    assert error_events
+    error = error_events[-1]
+    assert error.payload.status.failure_reason == "UnsupportedError"
+    assert error.payload.processing.tts is not None
+    assert error.payload.processing.tts.backend_name == "f5_http"
+    assert error.payload.processing.tts.fallback_used is True
+    assert error.payload.processing.tts.synthesis_latency_ms == 42
+    assert error.payload.processing.tts.audio_bytes == 0
+    assert error.payload.processing.tts.failure_reason == "UnsupportedError"
 
 
 @pytest.mark.asyncio

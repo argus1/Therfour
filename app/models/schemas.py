@@ -157,6 +157,11 @@ class CanonicalTurnProcessingTTS(BaseModel):
     voice_id: str
     output_format: str
     output_sample_rate_hz: Optional[int] = Field(default=None, ge=1)
+    fallback_used: bool = False
+    synthesis_latency_ms: Optional[int] = Field(default=None, ge=0)
+    audio_bytes: Optional[int] = Field(default=None, ge=0)
+    audio_duration_ms: Optional[int] = Field(default=None, ge=0)
+    failure_reason: str = ""
 
 
 class CanonicalTurnProcessing(BaseModel):

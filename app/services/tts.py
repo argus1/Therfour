@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import time
 import subprocess
 import tempfile
 import wave
@@ -106,6 +107,25 @@ class SpeechSynthesizer(Protocol):
 
 
 @dataclass(frozen=True)
+class TTSSynthesisObservability:
+    """Per-call TTS observability payload for turn-level telemetry."""
+
+    samples: np.ndarray | None
+    backend_name: str
+    voice_id: str
+    output_sample_rate_hz: int
+    fallback_used: bool
+    synthesis_latency_ms: int
+    audio_bytes: int
+    audio_duration_ms: int
+    failure_reason: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.samples is not None and not self.failure_reason
+
+
+@dataclass(frozen=True)
 class PiperSpeechSynthesizer:
     """Piper-backed implementation of :class:`SpeechSynthesizer`."""
 
@@ -164,12 +184,14 @@ class F5MLXLocalSpeechSynthesizer:
         )
 
 
-@dataclass(frozen=True)
+@dataclass
 class FallbackSpeechSynthesizer:
     """Wrap a primary synthesizer with a fallback synthesizer."""
 
     primary: SpeechSynthesizer
     fallback: SpeechSynthesizer
+    last_call_backend_name: str = ""
+    last_call_fallback_used: bool = False
 
     @property
     def backend_name(self) -> str:
@@ -184,12 +206,15 @@ class FallbackSpeechSynthesizer:
         options: dict[str, Any] | None = None,
     ) -> np.ndarray:
         try:
-            return await self.primary.synthesize(
+            samples = await self.primary.synthesize(
                 text,
                 voice=voice,
                 language=language,
                 options=options,
             )
+            self.last_call_backend_name = self.primary.backend_name
+            self.last_call_fallback_used = False
+            return samples
         except (UnsupportedError, EmptyOutputError) as exc:
             logger.warning(
                 "%s failed (%s); falling back to %s",
@@ -197,12 +222,15 @@ class FallbackSpeechSynthesizer:
                 exc,
                 self.fallback.backend_name,
             )
-            return await self.fallback.synthesize(
+            samples = await self.fallback.synthesize(
                 text,
                 voice=voice,
                 language=language,
                 options=options,
             )
+            self.last_call_backend_name = self.fallback.backend_name
+            self.last_call_fallback_used = True
+            return samples
 
 
 class SessionStickyFallbackSpeechSynthesizer:
@@ -212,6 +240,8 @@ class SessionStickyFallbackSpeechSynthesizer:
         self.primary = primary
         self.fallback = fallback
         self._fallback_active = False
+        self.last_call_backend_name = primary.backend_name
+        self.last_call_fallback_used = False
 
     @property
     def backend_name(self) -> str:
@@ -230,20 +260,26 @@ class SessionStickyFallbackSpeechSynthesizer:
         options: dict[str, Any] | None = None,
     ) -> np.ndarray:
         if self._fallback_active:
-            return await self.fallback.synthesize(
+            samples = await self.fallback.synthesize(
                 text,
                 voice=voice,
                 language=language,
                 options=options,
             )
+            self.last_call_backend_name = self.fallback.backend_name
+            self.last_call_fallback_used = True
+            return samples
 
         try:
-            return await self.primary.synthesize(
+            samples = await self.primary.synthesize(
                 text,
                 voice=voice,
                 language=language,
                 options=options,
             )
+            self.last_call_backend_name = self.primary.backend_name
+            self.last_call_fallback_used = False
+            return samples
         except (UnsupportedError, EmptyOutputError) as exc:
             self._fallback_active = True
             logger.warning(
@@ -252,12 +288,15 @@ class SessionStickyFallbackSpeechSynthesizer:
                 exc,
                 self.fallback.backend_name,
             )
-            return await self.fallback.synthesize(
+            samples = await self.fallback.synthesize(
                 text,
                 voice=voice,
                 language=language,
                 options=options,
             )
+            self.last_call_backend_name = self.fallback.backend_name
+            self.last_call_fallback_used = True
+            return samples
 
 
 def _build_backend_synthesizer(backend: str) -> SpeechSynthesizer:
@@ -285,6 +324,17 @@ def build_session_synthesizer() -> SpeechSynthesizer:
         primary=primary,
         fallback=PiperSpeechSynthesizer(),
     )
+
+
+def _resolve_observed_backend_name(synthesizer: SpeechSynthesizer) -> str:
+    observed = getattr(synthesizer, "last_call_backend_name", "")
+    if observed:
+        return str(observed)
+    return getattr(synthesizer, "backend_name", settings.tts_backend)
+
+
+def _resolve_observed_fallback_used(synthesizer: SpeechSynthesizer) -> bool:
+    return bool(getattr(synthesizer, "last_call_fallback_used", False))
 
 
 def _normalize_voice_id(voice: str | None) -> str:
@@ -577,3 +627,61 @@ async def synthesize(
         language=language,
         options=options,
     )
+
+
+async def synthesize_with_observability(
+    text: str,
+    *,
+    voice: str | None = None,
+    language: str | None = None,
+    options: dict[str, Any] | None = None,
+    synthesizer: SpeechSynthesizer | None = None,
+) -> TTSSynthesisObservability:
+    """Synthesize text and return audio plus per-call TTS observability metadata."""
+    active_synthesizer = synthesizer or _build_synthesizer()
+    start = time.perf_counter()
+    requested_backend = getattr(active_synthesizer, "backend_name", settings.tts_backend)
+
+    try:
+        try:
+            samples = await synthesize(
+                text,
+                voice=voice,
+                language=language,
+                options=options,
+                synthesizer=active_synthesizer,
+            )
+        except TypeError as exc:
+            # Test doubles may only accept a subset of keyword arguments.
+            samples = await synthesize(
+                text,
+                language=language,
+            )
+        latency_ms = round((time.perf_counter() - start) * 1000)
+        observed_backend = _resolve_observed_backend_name(active_synthesizer)
+        fallback_used = _resolve_observed_fallback_used(active_synthesizer)
+        voice_selection = _select_voice(voice=voice, language=language, backend=observed_backend)
+        return TTSSynthesisObservability(
+            samples=samples,
+            backend_name=observed_backend,
+            voice_id=voice_selection.voice_id,
+            output_sample_rate_hz=PIPER_SAMPLE_RATE,
+            fallback_used=fallback_used,
+            synthesis_latency_ms=latency_ms,
+            audio_bytes=int(samples.nbytes),
+            audio_duration_ms=round((len(samples) / PIPER_SAMPLE_RATE) * 1000),
+        )
+    except Exception as exc:
+        latency_ms = round((time.perf_counter() - start) * 1000)
+        voice_selection = _select_voice(voice=voice, language=language, backend=requested_backend)
+        return TTSSynthesisObservability(
+            samples=None,
+            backend_name=_resolve_observed_backend_name(active_synthesizer),
+            voice_id=voice_selection.voice_id,
+            output_sample_rate_hz=PIPER_SAMPLE_RATE,
+            fallback_used=_resolve_observed_fallback_used(active_synthesizer),
+            synthesis_latency_ms=latency_ms,
+            audio_bytes=0,
+            audio_duration_ms=0,
+            failure_reason=exc.__class__.__name__,
+        )
