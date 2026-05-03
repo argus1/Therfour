@@ -26,7 +26,7 @@ Evaluation date: **2026-05-03**
 | NVIDIA GPU available | ✅ | ❌ |
 | Local CUDA F5 benchmark path (`f5_cuda_local`) | ✅ with setup | ❌ not possible locally |
 | Piper local benchmark path | ✅ | ⚠️ possible with arm64-appropriate Piper binary/runtime |
-| Current Dockerfile compatibility | ✅ (x86_64 Piper tarball) | ❌ currently downloads x86_64 Piper binary |
+| Current Dockerfile compatibility | ✅ | ✅ architecture-aware Piper binary download |
 | Full local Piper vs F5 CUDA comparison | ✅ | ❌ |
 
 ## EC2 G4 readiness details
@@ -51,7 +51,7 @@ Evaluation date: **2026-05-03**
 
 ### Current repository gaps affecting turnkey G4 setup
 
-- `requirements.txt` currently does **not** include `f5-tts` or `piper-tts`, even though the TTS benchmark uses them.
+- Benchmark-only dependencies are now formalized in `requirements-bench.txt` (includes `f5-tts` and `piper-tts`).
 - First-time local F5 runs will download large model/vocoder artifacts, so warm-up time and disk requirements are non-trivial.
 
 ### G4 verdict
@@ -67,7 +67,7 @@ Evaluation date: **2026-05-03**
 
 ### Additional architecture caveat
 
-- Current `Dockerfile` installs `piper_linux_x86_64.tar.gz`; this is incompatible with T4g arm64 containers/hosts.
+- CUDA remains unavailable on T4g by hardware design, but the Dockerfile now supports arm64 Piper binary selection for non-CUDA paths.
 
 ### What is still feasible on T4g
 
@@ -89,7 +89,6 @@ Evaluation date: **2026-05-03**
 
 ## Suggested next improvements (repo-level)
 
-1. Add benchmark extras definition (for example `requirements-bench.txt`) including `f5-tts` and `piper-tts`.
-2. Make Dockerfile architecture-aware for Piper binary download (`x86_64` vs `aarch64`).
-3. Add explicit EC2 benchmark setup snippets for G4 in docs (driver/runtime, torch CUDA wheel selection, warm-cache step).
-4. Add benchmark mode flags to skip unavailable backends cleanly in mixed environments.
+1. Add explicit EC2 benchmark setup snippets for G4 in docs (driver/runtime, torch CUDA wheel selection, warm-cache step).
+2. Add benchmark mode flags to skip unavailable backends cleanly in mixed environments.
+3. Consider adding an arm64 CI smoke test for Piper-only benchmark flow.
