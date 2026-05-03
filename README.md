@@ -3,51 +3,53 @@
 **Multilingual Voice Agent for Harm Reduction**
 
 Therfour is a modular, open-source backend for telephone-based [harm-reduction
-and harm-prevention](https://doi.org/10.1080/13811118.2020.1823916) helplines.  It connects to a phone call via
+and harm-prevention](https://doi.org/10.1080/13811118.2020.1823916) helplines. It connects to a phone call via
 [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams), runs
 all AI inference locally, and returns synthesised speech – no data ever leaves
 your infrastructure.
 
-```
-Caller ──► Twilio ──► /calls/inbound (TwiML)
-                         │
-                         ▼
-               WebSocket /calls/stream
-                         │
-          ┌──────────────▼──────────────┐
-          │        CallSession          │
-          │  μ-law/8 kHz ──► float/16k  │
-          │       faster-whisper        │  ◄── STT
-          │            │                │
-          │         Ollama LLM          │  ◄── Local LLM (harm-reduction prompt)
-          │            │                │
-          │         Piper TTS           │  ◄── TTS
-          │  float/22k ──► μ-law/8 kHz  │
-          └──────────────┬──────────────┘
-                         │
-                         ▼
-               Audio sent back to caller
+```mermaid
+flowchart TD
+     Caller[Caller] --> Twilio[Twilio]
+     Twilio --> Inbound["/calls/inbound (TwiML)"]
+     Inbound --> Stream["WebSocket /calls/stream"]
+
+     subgraph Session[CallSession]
+          direction TB
+          Decode["mu-law 8 kHz -> float 16k"]
+          STT["faster-whisper"]
+          LLM["Ollama LLM"]
+          TTS["Piper TTS"]
+          Encode["float 22k -> mu-law 8 kHz"]
+          Decode --> STT --> LLM --> TTS --> Encode
+     end
+
+     Stream --> Decode
+     STTHint[STT] -.-> STT
+     LLMHint["Local LLM (harm-reduction prompt)"] -.-> LLM
+     TTSHint[TTS] -.-> TTS
+     Encode --> ReturnAudio[Audio sent back to caller]
 ```
 
 ## Tech stack
 
-| Layer       | Library / Tool                                         |
-|-------------|--------------------------------------------------------|
-| Web server  | [FastAPI](https://fastapi.tiangolo.com) + Uvicorn      |
+| Layer       | Library / Tool                                                          |
+| ----------- | ----------------------------------------------------------------------- |
+| Web server  | [FastAPI](https://fastapi.tiangolo.com) + Uvicorn                       |
 | Telephony   | [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams) |
-| STT         | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) |
-| TTS         | [Piper](https://github.com/rhasspy/piper)              |
-| LLM         | [Ollama](https://ollama.com) (local, any model)        |
-| Audio codec | Python `audioop` / `audioop-lts` + SciPy               |
+| STT         | [faster-whisper](https://github.com/SYSTRAN/faster-whisper)             |
+| TTS         | [Piper](https://github.com/rhasspy/piper)                               |
+| LLM         | [Ollama](https://ollama.com) (local, any model)                         |
+| Audio codec | Python `audioop` / `audioop-lts` + SciPy                                |
 
 ## Quick start
 
 ### Prerequisites
 
-* Python 3.11+
-* [Piper binary](https://github.com/rhasspy/piper/releases) on your `$PATH`
-* [Ollama](https://ollama.com) running locally with your chosen model pulled
-* A Twilio account with a voice-capable phone number
+- Python 3.11+
+- [Piper binary](https://github.com/rhasspy/piper/releases) on your `$PATH`
+- [Ollama](https://ollama.com) running locally with your chosen model pulled
+- A Twilio account with a voice-capable phone number
 
 ### 1 – Install Python dependencies
 
@@ -96,7 +98,7 @@ cp .env.example .env   # edit as above
 docker compose up --build
 ```
 
-Ollama and the application container are started together.  Pull your model
+Ollama and the application container are started together. Pull your model
 inside the ollama container after first boot:
 
 ```bash
@@ -152,13 +154,13 @@ swift test
 All settings can be overridden via environment variables or a `.env` file.
 See `.env.example` for the full list with descriptions.
 
-| Variable              | Default                          | Description                               |
-|-----------------------|----------------------------------|-------------------------------------------|
-| `WHISPER_MODEL`       | `small`                          | faster-whisper model size                 |
-| `WHISPER_LANGUAGE`    | *(auto-detect)*                  | Pin transcription language                |
-| `PIPER_BINARY`        | `piper`                          | Path to the Piper executable              |
-| `PIPER_MODEL_PATH`    | `models/en_US-lessac-medium.onnx`| Piper voice model                         |
-| `OLLAMA_MODEL`        | `llama3.2:3b`                    | Ollama model tag                          |
-| `OLLAMA_BASE_URL`     | `http://localhost:11434`         | Ollama API base URL                       |
-| `SILENCE_TIMEOUT_S`   | `1.5`                            | Seconds of silence before turn processing |
-| `PUBLIC_HOST`         | `localhost`                      | Hostname used in the TwiML `<Stream>` URL |
+| Variable            | Default                           | Description                               |
+| ------------------- | --------------------------------- | ----------------------------------------- |
+| `WHISPER_MODEL`     | `small`                           | faster-whisper model size                 |
+| `WHISPER_LANGUAGE`  | _(auto-detect)_                   | Pin transcription language                |
+| `PIPER_BINARY`      | `piper`                           | Path to the Piper executable              |
+| `PIPER_MODEL_PATH`  | `models/en_US-lessac-medium.onnx` | Piper voice model                         |
+| `OLLAMA_MODEL`      | `llama3.2:3b`                     | Ollama model tag                          |
+| `OLLAMA_BASE_URL`   | `http://localhost:11434`          | Ollama API base URL                       |
+| `SILENCE_TIMEOUT_S` | `1.5`                             | Seconds of silence before turn processing |
+| `PUBLIC_HOST`       | `localhost`                       | Hostname used in the TwiML `<Stream>` URL |
