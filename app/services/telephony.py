@@ -722,11 +722,7 @@ class CallSession:
             self._pending_post_call_reopen = None
             question = _post_call_reopen_prompt(transfer.target)
 
-        try:
-            tts_audio = await tts.synthesize(question, language=language)
-            await self._send_audio(tts_audio)
-        except Exception:
-            logger.exception("Failed to synthesize transfer confirmation prompt")
+        await self._speak_text(question, language)
 
     async def _handle_transfer_confirmation_response(
         self, response_text: str, response_result: stt.TranscriptionResult
@@ -750,15 +746,11 @@ class CallSession:
                 await self._execute_pending_transfer(response_result)
                 return
 
-            try:
-                tts_audio = await tts.synthesize(
-                    "Please say yes if you want me to return after the emergency line ends, "
-                    "or no if you do not.",
-                    language=response_result.language,
-                )
-                await self._send_audio(tts_audio)
-            except Exception:
-                logger.exception("Failed to synthesize reopen-preference clarification")
+            await self._speak_text(
+                "Please say yes if you want me to return after the emergency line ends, "
+                "or no if you do not.",
+                response_result.language,
+            )
             return
 
         if self._is_affirmative_response(response_text):
@@ -768,14 +760,10 @@ class CallSession:
                 self._awaiting_transfer_permission = False
                 self._awaiting_post_call_reopen_preference = True
                 self._pending_post_call_reopen = None
-                try:
-                    tts_audio = await tts.synthesize(
-                        _post_call_reopen_prompt(transfer.target),
-                        language=response_result.language,
-                    )
-                    await self._send_audio(tts_audio)
-                except Exception:
-                    logger.exception("Failed to synthesize post-call reopen prompt")
+                await self._speak_text(
+                    _post_call_reopen_prompt(transfer.target),
+                    response_result.language,
+                )
                 return
 
             await self._execute_pending_transfer(response_result)
@@ -787,11 +775,7 @@ class CallSession:
             cancellation = (
                 "Okay, I won't transfer you. I'm still here - please let me know how I can help."
             )
-            try:
-                tts_audio = await tts.synthesize(cancellation, language=response_result.language)
-                await self._send_audio(tts_audio)
-            except Exception:
-                logger.exception("Failed to synthesize transfer cancellation message")
+            await self._speak_text(cancellation, response_result.language)
             return
 
         # Unclear – re-ask active question
@@ -800,11 +784,7 @@ class CallSession:
             if self._awaiting_transfer_permission
             else "Please say yes or no."
         )
-        try:
-            tts_audio = await tts.synthesize(clarification, language=response_result.language)
-            await self._send_audio(tts_audio)
-        except Exception:
-            logger.exception("Failed to synthesize transfer confirmation clarification")
+        await self._speak_text(clarification, response_result.language)
 
     async def _execute_pending_transfer(self, response_result: stt.TranscriptionResult) -> None:
         transfer = self._pending_transfer
@@ -826,11 +806,7 @@ class CallSession:
                 f"I was unable to complete the transfer to {transfer.target} right now. "
                 "Please call directly if you are in immediate danger."
             )
-            try:
-                tts_audio = await tts.synthesize(fallback, language=response_result.language)
-                await self._send_audio(tts_audio)
-            except Exception:
-                logger.exception("Failed to synthesize transfer-failed message")
+            await self._speak_text(fallback, response_result.language)
 
     def _clear_pending_transfer_confirmation(self) -> None:
         self._in_transfer_confirmation = False
@@ -918,11 +894,25 @@ class CallSession:
             await self._ws.close()
 
     async def _speak_text(self, text: str, language: str | None) -> None:
-        try:
-            audio = await tts.synthesize(text, language=language)
-            await self._send_audio(audio)
-        except Exception:
-            logger.exception("Failed to synthesize prompt: %s", text)
+        tts_obs = await tts.synthesize_with_observability(
+            text, language=language, synthesizer=self._tts_synthesizer
+        )
+        logger.debug(
+            "TTS prompt: backend=%s fallback=%s latency_ms=%d failure_reason=%s",
+            tts_obs.backend_name,
+            tts_obs.fallback_used,
+            tts_obs.synthesis_latency_ms,
+            tts_obs.failure_reason,
+        )
+        if tts_obs.ok and tts_obs.samples is not None:
+            await self._send_audio(tts_obs.samples)
+        else:
+            logger.warning(
+                "TTS prompt synthesis failed: backend=%s reason=%s text=%r",
+                tts_obs.backend_name,
+                tts_obs.failure_reason,
+                text,
+            )
 
     # ── Low-confidence confirmation flow ──────────────────────────────────────
 
@@ -944,11 +934,7 @@ class CallSession:
         logger.info("Confirmation prompt: %s", prompt.prompt)
         
         # Synthesize and send confirmation prompt
-        try:
-            tts_audio = await tts.synthesize(prompt.prompt, language=stt_result.language)
-            await self._send_audio(tts_audio)
-        except Exception:
-            logger.exception("Failed to synthesize confirmation prompt")
+        await self._speak_text(prompt.prompt, stt_result.language)
 
     async def _handle_confirmation_response(
         self, response_text: str, response_result: stt.TranscriptionResult
@@ -1008,11 +994,7 @@ class CallSession:
                 )
             
             # Synthesize and send reply
-            try:
-                tts_audio = await tts.synthesize(spoken_reply, language=response_result.language)
-                await self._send_audio(tts_audio)
-            except Exception:
-                logger.exception("Failed to synthesize LLM reply after confirmation")
+            await self._speak_text(spoken_reply, response_result.language)
         
         elif self._is_negative_response(response_text):
             # User denied - check if we should retry or change topic
@@ -1030,32 +1012,20 @@ class CallSession:
                 prompt = LowConfidenceHandler.get_retry_prompt(self._confirmation_retry_count)
                 logger.info("Max retries exceeded. Topic change prompt: %s", prompt)
                 
-                try:
-                    tts_audio = await tts.synthesize(prompt, language=response_result.language)
-                    await self._send_audio(tts_audio)
-                except Exception:
-                    logger.exception("Failed to synthesize topic change prompt")
+                await self._speak_text(prompt, response_result.language)
             else:
                 # Allow retry
                 prompt = LowConfidenceHandler.get_retry_prompt(self._confirmation_retry_count)
                 logger.info("Requesting retry: %s", prompt)
                 
-                try:
-                    tts_audio = await tts.synthesize(prompt, language=response_result.language)
-                    await self._send_audio(tts_audio)
-                except Exception:
-                    logger.exception("Failed to synthesize retry prompt")
+                await self._speak_text(prompt, response_result.language)
         else:
             # Unclear response - ask again
             logger.info("Unclear response during confirmation: %s", response_text)
-            try:
-                tts_audio = await tts.synthesize(
-                    "I didn't catch that. Please say yes or no.",
-                    language=response_result.language,
-                )
-                await self._send_audio(tts_audio)
-            except Exception:
-                logger.exception("Failed to synthesize clarification prompt")
+            await self._speak_text(
+                "I didn't catch that. Please say yes or no.",
+                response_result.language,
+            )
 
     @staticmethod
     def _is_affirmative_response(text: str) -> bool:
