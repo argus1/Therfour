@@ -119,3 +119,26 @@ For each run:
 - `benchmarks/results/whisper_benchmark_<RUN_ID>.csv`
 
 `RUN_ID` is UTC timestamp in `YYYYMMDDTHHMMSSZ` format.
+
+## TTS CUDA quick-check (new hardware)
+
+Before running local F5-TTS CUDA benchmarks on a new Linux machine, run:
+
+```bash
+python benchmarks/cuda_compat_checker.py
+```
+
+This prints a JSON report covering:
+
+- `nvidia-smi` visibility and driver/runtime versions
+- CUDA driver API init (`cuInit`)
+- PyTorch CUDA build/runtime availability
+- final boolean: `compatible_for_local_cuda_f5`
+
+Then run the TTS comparison benchmark:
+
+```bash
+BENCHMARK_RUNS=1 python benchmarks/tts_comparison_benchmark.py
+```
+
+The raw benchmark JSON includes `cuda_compatibility` and `f5_cuda_local/*` summary keys.

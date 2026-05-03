@@ -19,6 +19,7 @@ attempts are recorded as failures with their error details.
 from __future__ import annotations
 
 import io
+import importlib
 import json
 import os
 import statistics
@@ -33,6 +34,11 @@ from typing import Any
 
 import httpx
 import numpy as np
+
+try:
+    from benchmarks.cuda_compat_checker import run_cuda_compatibility_check
+except Exception:  # pragma: no cover - fallback for direct script execution contexts
+    from cuda_compat_checker import run_cuda_compatibility_check  # type: ignore[no-redef]
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -69,6 +75,15 @@ F5_MLX_REF_AUDIO_TEXT = (
     "and collaboratively identify small, achievable next steps toward safety."
 )
 _F5_MLX_REF_AUDIO_24K_PATH: str | None = None
+
+# F5-TTS local CUDA
+F5_CUDA_MODEL = os.environ.get("F5_CUDA_MODEL", "F5TTS_v1_Base")
+F5_CUDA_DEVICE = os.environ.get("F5_CUDA_DEVICE", "cuda")
+F5_CUDA_NFE_STEP = int(os.environ.get("F5_CUDA_NFE_STEP", "32"))
+F5_CUDA_CFG_STRENGTH = float(os.environ.get("F5_CUDA_CFG_STRENGTH", "2.0"))
+F5_CUDA_SPEED = float(os.environ.get("F5_CUDA_SPEED", "1.0"))
+F5_CUDA_REF_AUDIO_PATH = os.environ.get("F5_CUDA_REF_AUDIO_PATH", F5_MLX_REF_AUDIO_PATH)
+F5_CUDA_REF_AUDIO_TEXT = os.environ.get("F5_CUDA_REF_AUDIO_TEXT", F5_MLX_REF_AUDIO_TEXT)
 
 SILENCE_DURATION_S = 2.0
 
@@ -136,7 +151,7 @@ class BenchmarkReport:
         self.results.append(r)
 
     def summarise(self) -> None:
-        for backend in ("piper", "f5", "f5_mlx"):
+        for backend in ("piper", "f5", "f5_mlx", "f5_cuda_local"):
             for passage in PASSAGES:
                 pid = passage["id"]
                 runs = [
@@ -249,6 +264,20 @@ def _write_wav(path: Path, pcm: np.ndarray, sample_rate: int) -> None:
         wf.writeframes(pcm_int16.tobytes())
 
 
+def _pcm_float_to_wav_bytes(pcm: np.ndarray, sample_rate: int) -> bytes:
+    """Encode float PCM to 16-bit mono WAV bytes."""
+    pcm = np.asarray(pcm, dtype=np.float32)
+    pcm_int16 = np.clip(pcm, -1.0, 1.0)
+    pcm_int16 = (pcm_int16 * 32767).astype(np.int16)
+    with io.BytesIO() as buf:
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(pcm_int16.tobytes())
+        return buf.getvalue()
+
+
 def _prepare_f5_mlx_ref_audio_24k() -> str:
     """Return a 24kHz mono WAV path for f5-tts-mlx reference conditioning."""
     global _F5_MLX_REF_AUDIO_24K_PATH
@@ -355,21 +384,30 @@ def generate_mos_files(report: BenchmarkReport) -> dict[str, Path]:
 
         combined_segments.extend([piper_label_pcm, piper_pcm, gap.copy()])
 
-        # ── F5-TTS MLX ────────────────────────────────────────────────────────
-        f5_label_text = f"F5-TTS MLX. {label} passage."
-        print(f"  [{label}] F5-TTS MLX label …", end=" ", flush=True)
-        f5_label_pcm = _synth_label(f5_label_text, sample_rate)
-        print("ok  |  synthesising passage …", end=" ", flush=True)
-
-        # Look for a successful f5_mlx result for this passage in the report
-        f5_successful = [
+        # ── F5-TTS variant (prefer CUDA local, then MLX) ─────────────────────
+        f5_cuda_successful = [
+            r for r in report.results
+            if r.backend == "f5_cuda_local" and r.passage_id == pid and r.success
+        ]
+        f5_mlx_successful = [
             r for r in report.results
             if r.backend == "f5_mlx" and r.passage_id == pid and r.success
         ]
+
+        f5_variant = "CUDA local" if f5_cuda_successful else "MLX"
+        f5_label_text = f"F5-TTS {f5_variant}. {label} passage."
+        print(f"  [{label}] F5-TTS {f5_variant} label …", end=" ", flush=True)
+        f5_label_pcm = _synth_label(f5_label_text, sample_rate)
+        print("ok  |  synthesising passage …", end=" ", flush=True)
+
+        f5_successful = f5_cuda_successful or f5_mlx_successful
         if f5_successful:
             # Re-synthesise fresh for the MOS file
             try:
-                f5_audio_bytes, _ = synthesize_f5_mlx(text)
+                if f5_cuda_successful:
+                    f5_audio_bytes, _ = synthesize_f5_cuda_local(text)
+                else:
+                    f5_audio_bytes, _ = synthesize_f5_mlx(text)
                 f5_pcm, f5_sr = _wav_bytes_to_pcm(f5_audio_bytes)
                 if f5_sr != sample_rate:
                     from scipy.signal import resample_poly  # noqa: PLC0415
@@ -382,7 +420,7 @@ def generate_mos_files(report: BenchmarkReport) -> dict[str, Path]:
 
         if not f5_successful:
             if unavailable_pcm is None:
-                unavailable_pcm = _synth_label("F5-TTS MLX not available.", sample_rate)
+                unavailable_pcm = _synth_label("F5-TTS backend not available.", sample_rate)
             combined_segments.extend([f5_label_pcm, unavailable_pcm])
             print("not available — spoken notice inserted")
 
@@ -401,7 +439,7 @@ def generate_mos_files(report: BenchmarkReport) -> dict[str, Path]:
 # ── F5-TTS MLX local synthesis ───────────────────────────────────────────────
 def synthesize_f5_mlx(text: str, speed: float = 1.0) -> tuple[bytes, float]:
     """Synthesise via f5-tts-mlx (Apple Silicon / MLX). Return (wav_bytes, latency_ms)."""
-    from f5_tts_mlx.generate import generate  # noqa: PLC0415
+    generate = importlib.import_module("f5_tts_mlx.generate").generate
 
     ref_audio_path = _prepare_f5_mlx_ref_audio_24k()
 
@@ -425,11 +463,52 @@ def synthesize_f5_mlx(text: str, speed: float = 1.0) -> tuple[bytes, float]:
     return wav_bytes, latency_ms
 
 
+def _f5_cuda_engine():
+    """Load and cache local CUDA F5 engine."""
+    if not hasattr(_f5_cuda_engine, "_cache"):
+        from f5_tts.api import F5TTS  # noqa: PLC0415
+
+        _f5_cuda_engine._cache = F5TTS(  # type: ignore[attr-defined]
+            model=F5_CUDA_MODEL,
+            device=F5_CUDA_DEVICE,
+        )
+    return _f5_cuda_engine._cache  # type: ignore[attr-defined]
+
+
+def synthesize_f5_cuda_local(text: str) -> tuple[bytes, float]:
+    """Synthesize via local F5-TTS (PyTorch/CUDA). Return (wav_bytes, latency_ms)."""
+    engine = _f5_cuda_engine()
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp_wav:
+        t0 = time.perf_counter()
+        wav, sample_rate, _spec = engine.infer(
+            ref_file=F5_CUDA_REF_AUDIO_PATH,
+            ref_text=F5_CUDA_REF_AUDIO_TEXT,
+            gen_text=text,
+            nfe_step=F5_CUDA_NFE_STEP,
+            cfg_strength=F5_CUDA_CFG_STRENGTH,
+            speed=F5_CUDA_SPEED,
+            file_wave=tmp_wav.name,
+        )
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+
+        tmp_wav.seek(0)
+        wav_bytes = tmp_wav.read()
+
+    if not wav_bytes:
+        # Defensive fallback: encode returned numpy waveform directly.
+        wav_bytes = _pcm_float_to_wav_bytes(np.asarray(wav, dtype=np.float32), int(sample_rate))
+
+    if not wav_bytes:
+        raise RuntimeError("local f5-tts CUDA produced empty WAV output")
+    return wav_bytes, latency_ms
+
+
 # ── check f5 availability ─────────────────────────────────────────────────────
 def probe_f5_mlx_health() -> tuple[bool, str]:
     """Return (available, note). Checks whether f5-tts-mlx is importable."""
     try:
-        import f5_tts_mlx  # noqa: PLC0415, F401
+        importlib.import_module("f5_tts_mlx")
         return True, f"f5-tts-mlx installed (model: {F5_MLX_MODEL})"
     except ImportError:
         return False, "f5-tts-mlx not installed — run: pip install f5-tts-mlx"
@@ -444,6 +523,23 @@ def probe_f5_http_health() -> tuple[bool, str]:
     except Exception:
         pass
     return False, f"F5-TTS HTTP not available at {F5_ENDPOINT}"
+
+
+def probe_f5_cuda_local_health(cuda_report: dict[str, Any]) -> tuple[bool, str]:
+    """Return (available, note). Checks whether local CUDA F5 is likely runnable."""
+    if not cuda_report.get("compatible_for_local_cuda_f5", False):
+        notes = "; ".join(cuda_report.get("notes", [])[:2])
+        return False, f"CUDA compatibility failed ({notes})"
+
+    if not os.path.exists(F5_CUDA_REF_AUDIO_PATH):
+        return False, f"Missing F5_CUDA_REF_AUDIO_PATH at {F5_CUDA_REF_AUDIO_PATH}"
+
+    try:
+        import f5_tts  # noqa: PLC0415, F401
+    except Exception as exc:
+        return False, f"f5-tts not importable ({exc})"
+
+    return True, f"local f5-tts CUDA ready (model={F5_CUDA_MODEL}, device={F5_CUDA_DEVICE})"
 
 
 # ── main benchmark loop ───────────────────────────────────────────────────────
@@ -468,6 +564,18 @@ def run_benchmark() -> BenchmarkReport:
         sys.exit(1)
 
     # ── F5-TTS availability probes ────────────────────────────────────────────
+    cuda_report = run_cuda_compatibility_check()
+    cuda_ok = bool(cuda_report.get("compatible_for_local_cuda_f5", False))
+    print(
+        "── CUDA compatibility … "
+        f"{'ok' if cuda_ok else 'UNAVAILABLE'} — "
+        f"torch_cuda={cuda_report.get('torch', {}).get('cuda_available', False)}"
+    )
+
+    print("── Probing local f5-tts CUDA …", end=" ", flush=True)
+    f5_cuda_available, f5_cuda_probe_note = probe_f5_cuda_local_health(cuda_report)
+    print(f"{'available' if f5_cuda_available else 'UNAVAILABLE'} — {f5_cuda_probe_note}")
+
     print("── Probing f5-tts-mlx …", end=" ", flush=True)
     f5_mlx_available, f5_mlx_probe_note = probe_f5_mlx_health()
     print(f"{'available' if f5_mlx_available else 'UNAVAILABLE'} — {f5_mlx_probe_note}")
@@ -476,8 +584,12 @@ def run_benchmark() -> BenchmarkReport:
     f5_http_available, f5_http_probe_note = probe_f5_http_health()
     print(f"{'available' if f5_http_available else 'UNAVAILABLE'} — {f5_http_probe_note}")
 
-    f5_available = f5_mlx_available or f5_http_available
-    f5_probe_note = f5_mlx_probe_note if f5_mlx_available else f5_http_probe_note
+    f5_available = f5_cuda_available or f5_mlx_available or f5_http_available
+    f5_probe_note = (
+        f5_cuda_probe_note
+        if f5_cuda_available
+        else (f5_mlx_probe_note if f5_mlx_available else f5_http_probe_note)
+    )
 
     # ── Benchmark runs ────────────────────────────────────────────────────────
     for passage in PASSAGES:
@@ -546,6 +658,41 @@ def run_benchmark() -> BenchmarkReport:
                     error=f"f5-tts-mlx not available: {f5_mlx_probe_note}",
                 ))
 
+            # F5-TTS local CUDA (PyTorch)
+            if f5_cuda_available:
+                try:
+                    audio_bytes, latency_ms = synthesize_f5_cuda_local(text)
+                    report.add(SynthesisResult(
+                        backend="f5_cuda_local",
+                        passage_id=pid,
+                        run_index=run,
+                        latency_ms=latency_ms,
+                        audio_bytes=len(audio_bytes),
+                        success=True,
+                    ))
+                    print(f"  f5_cuda run {run}: {latency_ms:.1f} ms  {len(audio_bytes)//1024} KB")
+                except Exception as exc:
+                    report.add(SynthesisResult(
+                        backend="f5_cuda_local",
+                        passage_id=pid,
+                        run_index=run,
+                        latency_ms=None,
+                        audio_bytes=None,
+                        success=False,
+                        error=str(exc),
+                    ))
+                    print(f"  f5_cuda run {run}: FAILED — {exc}")
+            else:
+                report.add(SynthesisResult(
+                    backend="f5_cuda_local",
+                    passage_id=pid,
+                    run_index=run,
+                    latency_ms=None,
+                    audio_bytes=None,
+                    success=False,
+                    error=f"local f5-tts CUDA not available: {f5_cuda_probe_note}",
+                ))
+
             # F5-TTS HTTP (kept for completeness; usually not available in this env)
             if f5_http_available:
                 try:
@@ -583,6 +730,11 @@ def run_benchmark() -> BenchmarkReport:
                 "f5_endpoint": report.f5_endpoint,
                 "f5_voice": report.f5_voice,
                 "benchmark_runs": report.benchmark_runs,
+                "f5_any_available": f5_available,
+                "f5_any_probe_note": f5_probe_note,
+                "cuda_compatibility": cuda_report,
+                "f5_cuda_available": f5_cuda_available,
+                "f5_cuda_probe_note": f5_cuda_probe_note,
                 "f5_mlx_available": f5_mlx_available,
                 "f5_mlx_probe_note": f5_mlx_probe_note,
                 "f5_http_available": f5_http_available,
