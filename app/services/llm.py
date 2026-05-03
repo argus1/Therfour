@@ -89,6 +89,10 @@ SAFETY_GUARDRAILS = (
     "steps, and encourage contacting emergency support when risk is acute.\n"
     "- You may discuss drug use and self-harm openly for harm-reduction education, but never "
     "encourage, coach, or escalate dangerous behavior.\n"
+    "- Do not reveal chain-of-thought, hidden reasoning, or internal deliberation; provide only "
+    "the caller-facing answer.\n"
+    "- Do not narrate internal process details such as retrieval steps, prompt policy, scoring, "
+    "or tool-selection logic.\n"
     "- Never invent facts, clinical claims, service availability, or legal advice. If "
     "critical details are uncertain, say so briefly and provide the safest practical next "
     "step.\n"
@@ -178,7 +182,8 @@ async def generate(
             json=payload,
         )
         resp.raise_for_status()
-        return backend.extract_text(resp.json())
+        raw_text = backend.extract_text(resp.json())
+        return _sanitize_post_generation_output(raw_text, stream_mode=False)
 
 
 async def generate_stream(
@@ -190,6 +195,7 @@ async def generate_stream(
     turn = await _construct_turn(messages, strategy=strategy, rag_allowed=rag_allowed)
     backend = get_backend(settings.llm_provider)
     payload = backend.payload(turn.messages, stream=True)
+    streamed_tokens: list[str] = []
 
     async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
         async with client.stream(
@@ -201,9 +207,24 @@ async def generate_stream(
             async for line in resp.aiter_lines():
                 tokens, done = backend.iter_stream_tokens(line)
                 for token in tokens:
+                    streamed_tokens.append(token)
                     yield token
                 if done:
+                    _sanitize_post_generation_output(
+                        "".join(streamed_tokens),
+                        stream_mode=True,
+                    )
                     break
+
+
+def _sanitize_post_generation_output(text: str, *, stream_mode: bool) -> str:
+    """Post-generation sanitizer hook.
+
+    This is currently a no-op stub so enforcement rules can be added later
+    without changing generation call sites.
+    """
+    _ = stream_mode
+    return text
 
 
 async def _construct_turn(
@@ -214,20 +235,25 @@ async def _construct_turn(
     history = _normalize_history(messages)
     latest_query = _latest_user_message(history)
 
-    prompt = f"{HARM_REDUCTION_SYSTEM_PROMPT}{SAFETY_GUARDRAILS}{DETERMINISTIC_TURN_POLICY}"
+    system_messages: list[dict[str, str]] = [
+        {"role": "system", "content": HARM_REDUCTION_SYSTEM_PROMPT},
+        {"role": "system", "content": SAFETY_GUARDRAILS},
+        {"role": "system", "content": DETERMINISTIC_TURN_POLICY},
+    ]
+
     if strategy == TurnStrategy.RAPPORT_BUILDING.value:
-        prompt = f"{prompt}{RAPPORT_LISTENING_CONTRACT}"
+        system_messages.append({"role": "system", "content": RAPPORT_LISTENING_CONTRACT})
     elif strategy == TurnStrategy.INFO_GATHERING_NO_RAG.value:
-        prompt = f"{prompt}{INFO_GATHERING_CONTRACT}"
+        system_messages.append({"role": "system", "content": INFO_GATHERING_CONTRACT})
     elif strategy == TurnStrategy.UNDERSTANDING_CHECK_NO_RAG.value:
-        prompt = f"{prompt}{UNDERSTANDING_CHECK_CONTRACT}"
+        system_messages.append({"role": "system", "content": UNDERSTANDING_CHECK_CONTRACT})
     elif strategy == TurnStrategy.EXPLANATION_RAG_OPTIONAL.value:
-        prompt = f"{prompt}{EXPLANATION_CONTRACT}"
+        system_messages.append({"role": "system", "content": EXPLANATION_CONTRACT})
 
     if settings.transfer_services_enabled:
         services_block = transfer_services.build_prompt_block()
         if services_block:
-            prompt = f"{prompt}\n\n{services_block}"
+            system_messages.append({"role": "system", "content": services_block})
 
     rag_used = False
     should_use_rag = bool(settings.rag_enabled)
@@ -241,23 +267,25 @@ async def _construct_turn(
         should_use_rag = False
 
     if should_use_rag:
-        prompt = f"{prompt}{RAG_GROUNDING_RULES}"
+        system_messages.append({"role": "system", "content": RAG_GROUNDING_RULES})
         if latest_query:
             result = await asyncio.to_thread(rag.retrieve, latest_query)
             context_block = rag.build_context_block(result.contexts)
             if context_block:
                 rag_used = True
-                prompt = (
-                    f"{prompt}\n\n"
-                    f"Retrieval metadata:\n"
+                retrieval_message = (
+                    "Retrieval metadata:\n"
                     f"- strategy: {result.strategy_used}\n"
                     f"- selected_category: {result.selected_category}\n"
                     f"- candidate_count: {result.candidate_count}\n"
                     f"- final_context_count: {result.filtered_count}\n\n"
                     f"{context_block}"
                 )
+                system_messages.append(
+                    {"role": "system", "content": retrieval_message}
+                )
 
-    turn_messages = [{"role": "system", "content": prompt}, *history]
+    turn_messages = [*system_messages, *history]
     return TurnConstruction(
         messages=turn_messages,
         latest_user_query=latest_query,

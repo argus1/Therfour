@@ -10,6 +10,14 @@ from app.services import llm as llm_service
 from app.services.turn_strategy import TurnStrategy
 
 
+def _system_content_blob(messages: list[dict[str, str]]) -> str:
+    return "\n".join(
+        str(message.get("content", ""))
+        for message in messages
+        if message.get("role") == "system"
+    )
+
+
 @pytest.mark.asyncio
 async def test_generate_returns_string() -> None:
     """generate() should return the assistant reply as a plain string."""
@@ -33,6 +41,38 @@ async def test_generate_returns_string() -> None:
 
     assert isinstance(result, str)
     assert "safe" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_generate_applies_post_generation_sanitizer(monkeypatch) -> None:
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json.return_value = {
+        "message": {"content": "raw assistant output"}
+    }
+
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    sanitizer_calls: list[tuple[str, bool]] = []
+
+    def _fake_sanitizer(text: str, *, stream_mode: bool) -> str:
+        sanitizer_calls.append((text, stream_mode))
+        return "sanitized assistant output"
+
+    monkeypatch.setattr(llm_service, "_sanitize_post_generation_output", _fake_sanitizer)
+
+    with patch("app.services.llm.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(llm_service.settings, "rag_enabled", False):
+            result = await llm_service.generate(
+                [{"role": "user", "content": "hello"}]
+            )
+
+    assert result == "sanitized assistant output"
+    assert sanitizer_calls == [("raw assistant output", False)]
 
 
 def test_system_prompt_contains_harm_reduction_keywords() -> None:
@@ -88,7 +128,7 @@ async def test_generate_includes_rag_context_when_enabled() -> None:
                     ])
 
     sent_payload = mock_client.post.await_args.kwargs["json"]
-    system_prompt = sent_payload["messages"][0]["content"]
+    system_prompt = _system_content_blob(sent_payload["messages"])
     assert "RAG grounding policy" in system_prompt
     assert "Retrieved context" in system_prompt
 
@@ -137,7 +177,7 @@ async def test_construct_turn_includes_guardrails_and_retrieval_metadata(monkeyp
                 [{"role": "user", "content": "How to reduce overdose risk?"}]
             )
 
-    system_prompt = turn.messages[0]["content"]
+    system_prompt = _system_content_blob(turn.messages)
     assert "Safety guardrails" in system_prompt
     assert "Deterministic turn policy" in system_prompt
     assert "Retrieval metadata" in system_prompt
@@ -155,7 +195,7 @@ async def test_construct_turn_includes_transfer_services_catalog_when_enabled(mo
             [{"role": "user", "content": "Can you transfer me to counseling appointments?"}]
         )
 
-    system_prompt = turn.messages[0]["content"]
+    system_prompt = _system_content_blob(turn.messages)
     assert "Transfer services catalog" in system_prompt
 
 
@@ -209,7 +249,7 @@ async def test_construct_turn_suppresses_rag_for_rapport_strategy(monkeypatch) -
         )
 
     assert turn.rag_used is False
-    assert "Turn strategy: rapport_building" in turn.messages[0]["content"]
+    assert "Turn strategy: rapport_building" in _system_content_blob(turn.messages)
     mock_retrieve.assert_not_called()
 
 
@@ -225,7 +265,7 @@ async def test_construct_turn_suppresses_rag_for_info_gathering_strategy(monkeyp
         )
 
     assert turn.rag_used is False
-    assert "Turn strategy: info_gathering_no_rag" in turn.messages[0]["content"]
+    assert "Turn strategy: info_gathering_no_rag" in _system_content_blob(turn.messages)
     mock_retrieve.assert_not_called()
 
 
@@ -241,7 +281,7 @@ async def test_construct_turn_suppresses_rag_for_understanding_check_strategy(mo
         )
 
     assert turn.rag_used is False
-    assert "Turn strategy: understanding_check_no_rag" in turn.messages[0]["content"]
+    assert "Turn strategy: understanding_check_no_rag" in _system_content_blob(turn.messages)
     mock_retrieve.assert_not_called()
 
 
@@ -266,5 +306,5 @@ async def test_construct_turn_allows_rag_for_explanation_strategy(monkeypatch) -
             )
 
     assert turn.rag_used is True
-    assert "Turn strategy: explanation_rag_optional" in turn.messages[0]["content"]
+    assert "Turn strategy: explanation_rag_optional" in _system_content_blob(turn.messages)
     mock_retrieve.assert_called_once()
