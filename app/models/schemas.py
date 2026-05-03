@@ -148,6 +148,20 @@ class CanonicalTurnProcessingLLM(BaseModel):
     strategy: Optional[str] = None
 
 
+CanonicalTTSFailureReason = Literal[
+    "",
+    "empty_text",
+    "binary_not_found",
+    "timeout",
+    "backend_http_error",
+    "invalid_response",
+    "empty_output",
+    "synthesis_failed",
+    "unsupported",
+    "unknown",
+]
+
+
 class CanonicalTurnProcessingTTS(BaseModel):
     """TTS processing fields for a turn."""
 
@@ -161,7 +175,7 @@ class CanonicalTurnProcessingTTS(BaseModel):
     synthesis_latency_ms: Optional[int] = Field(default=None, ge=0)
     audio_bytes: Optional[int] = Field(default=None, ge=0)
     audio_duration_ms: Optional[int] = Field(default=None, ge=0)
-    failure_reason: str = ""
+    failure_reason: CanonicalTTSFailureReason = ""
 
 
 class CanonicalTurnProcessing(BaseModel):
