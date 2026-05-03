@@ -16,7 +16,7 @@ import wave
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 import numpy as np
@@ -87,6 +87,204 @@ _DEFAULT_F5_VOICE_BY_LANGUAGE = {
     "yue": "zh_cantonese_default",
     "ja": "ja_default",
 }
+
+
+class SpeechSynthesizer(Protocol):
+    """Formal interface for interchangeable TTS synthesizer backends."""
+
+    backend_name: str
+
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        language: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> np.ndarray:
+        """Synthesize text to float32 PCM at :data:`PIPER_SAMPLE_RATE`."""
+
+
+@dataclass(frozen=True)
+class PiperSpeechSynthesizer:
+    """Piper-backed implementation of :class:`SpeechSynthesizer`."""
+
+    backend_name: str = "piper"
+
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        language: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> np.ndarray:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            _executor,
+            partial(_synthesize_piper, text, voice=voice, language=language, options=options),
+        )
+
+
+@dataclass(frozen=True)
+class F5HTTPSpeechSynthesizer:
+    """HTTP F5-TTS implementation of :class:`SpeechSynthesizer`."""
+
+    backend_name: str = "f5_http"
+
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        language: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> np.ndarray:
+        return await _synthesize_f5_http(text, voice=voice, language=language, options=options)
+
+
+@dataclass(frozen=True)
+class F5MLXLocalSpeechSynthesizer:
+    """Local MLX F5-TTS implementation of :class:`SpeechSynthesizer`."""
+
+    backend_name: str = "f5_mlx_local"
+
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        language: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> np.ndarray:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            _executor,
+            partial(_synthesize_f5_mlx_local_sync, text, voice=voice, language=language, options=options),
+        )
+
+
+@dataclass(frozen=True)
+class FallbackSpeechSynthesizer:
+    """Wrap a primary synthesizer with a fallback synthesizer."""
+
+    primary: SpeechSynthesizer
+    fallback: SpeechSynthesizer
+
+    @property
+    def backend_name(self) -> str:
+        return self.primary.backend_name
+
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        language: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> np.ndarray:
+        try:
+            return await self.primary.synthesize(
+                text,
+                voice=voice,
+                language=language,
+                options=options,
+            )
+        except (UnsupportedError, EmptyOutputError) as exc:
+            logger.warning(
+                "%s failed (%s); falling back to %s",
+                self.primary.backend_name,
+                exc,
+                self.fallback.backend_name,
+            )
+            return await self.fallback.synthesize(
+                text,
+                voice=voice,
+                language=language,
+                options=options,
+            )
+
+
+class SessionStickyFallbackSpeechSynthesizer:
+    """Fallback wrapper that sticks to fallback after the first primary failure."""
+
+    def __init__(self, primary: SpeechSynthesizer, fallback: SpeechSynthesizer) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self._fallback_active = False
+
+    @property
+    def backend_name(self) -> str:
+        return self.fallback.backend_name if self._fallback_active else self.primary.backend_name
+
+    @property
+    def fallback_active(self) -> bool:
+        return self._fallback_active
+
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        language: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> np.ndarray:
+        if self._fallback_active:
+            return await self.fallback.synthesize(
+                text,
+                voice=voice,
+                language=language,
+                options=options,
+            )
+
+        try:
+            return await self.primary.synthesize(
+                text,
+                voice=voice,
+                language=language,
+                options=options,
+            )
+        except (UnsupportedError, EmptyOutputError) as exc:
+            self._fallback_active = True
+            logger.warning(
+                "%s failed (%s); enabling session-sticky fallback=%s",
+                self.primary.backend_name,
+                exc,
+                self.fallback.backend_name,
+            )
+            return await self.fallback.synthesize(
+                text,
+                voice=voice,
+                language=language,
+                options=options,
+            )
+
+
+def _build_backend_synthesizer(backend: str) -> SpeechSynthesizer:
+    normalized = backend.lower()
+    if normalized == "f5_http":
+        return F5HTTPSpeechSynthesizer()
+    if normalized == "f5_mlx_local":
+        return F5MLXLocalSpeechSynthesizer()
+    return PiperSpeechSynthesizer()
+
+
+def _build_synthesizer() -> SpeechSynthesizer:
+    primary = _build_backend_synthesizer(settings.tts_backend)
+    if settings.tts_fallback_backend != "piper" or primary.backend_name == "piper":
+        return primary
+    return FallbackSpeechSynthesizer(primary=primary, fallback=PiperSpeechSynthesizer())
+
+
+def build_session_synthesizer() -> SpeechSynthesizer:
+    """Build a synthesizer suitable for one call session with sticky fallback."""
+    primary = _build_backend_synthesizer(settings.tts_backend)
+    if settings.tts_fallback_backend != "piper" or primary.backend_name == "piper":
+        return primary
+    return SessionStickyFallbackSpeechSynthesizer(
+        primary=primary,
+        fallback=PiperSpeechSynthesizer(),
+    )
 
 
 def _normalize_voice_id(voice: str | None) -> str:
@@ -369,31 +567,13 @@ async def synthesize(
     voice: str | None = None,
     language: str | None = None,
     options: dict[str, Any] | None = None,
+    synthesizer: SpeechSynthesizer | None = None,
 ) -> np.ndarray:
     """Synthesize *text* to speech, returning float32 PCM at :data:`PIPER_SAMPLE_RATE` Hz."""
-    backend = settings.tts_backend.lower()
-    loop = asyncio.get_event_loop()
-
-    if backend == "f5_http":
-        try:
-            return await _synthesize_f5_http(text, voice=voice, language=language, options=options)
-        except (UnsupportedError, EmptyOutputError) as exc:
-            if settings.tts_fallback_backend != "piper":
-                raise
-            logger.warning("F5-TTS HTTP failed (%s); falling back to Piper", exc)
-
-    elif backend == "f5_mlx_local":
-        try:
-            return await loop.run_in_executor(
-                _executor,
-                partial(_synthesize_f5_mlx_local_sync, text, voice=voice, language=language, options=options),
-            )
-        except (UnsupportedError, EmptyOutputError) as exc:
-            if settings.tts_fallback_backend != "piper":
-                raise
-            logger.warning("f5-tts-mlx failed (%s); falling back to Piper", exc)
-
-    return await loop.run_in_executor(
-        _executor,
-        partial(_synthesize_piper, text, voice=voice, language=language, options=options),
+    active_synthesizer = synthesizer or _build_synthesizer()
+    return await active_synthesizer.synthesize(
+        text,
+        voice=voice,
+        language=language,
+        options=options,
     )

@@ -169,3 +169,39 @@ async def test_synthesize_f5_falls_back_to_piper() -> None:
                     samples = await tts_service.synthesize("hello")
 
     assert len(samples) == tts_service.PIPER_SAMPLE_RATE
+
+
+@pytest.mark.asyncio
+async def test_session_sticky_fallback_remains_on_fallback_after_first_failure() -> None:
+    class _Primary:
+        backend_name = "f5_http"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def synthesize(self, text, *, voice=None, language=None, options=None):
+            self.calls += 1
+            raise tts_service.UnsupportedError("primary unavailable")
+
+    class _Fallback:
+        backend_name = "piper"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def synthesize(self, text, *, voice=None, language=None, options=None):
+            self.calls += 1
+            return np.zeros(tts_service.PIPER_SAMPLE_RATE, dtype=np.float32)
+
+    primary = _Primary()
+    fallback = _Fallback()
+    wrapper = tts_service.SessionStickyFallbackSpeechSynthesizer(primary=primary, fallback=fallback)
+
+    first = await wrapper.synthesize("hello")
+    second = await wrapper.synthesize("hello again")
+
+    assert wrapper.fallback_active is True
+    assert primary.calls == 1
+    assert fallback.calls == 2
+    assert len(first) == tts_service.PIPER_SAMPLE_RATE
+    assert len(second) == tts_service.PIPER_SAMPLE_RATE
