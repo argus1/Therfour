@@ -172,6 +172,10 @@ Run from repo root:
 
 For more options and reproducibility guidance, see `benchmarks/README.md`.
 
+## EC2 benchmark readiness
+
+If you plan to run end-to-end benchmarks on AWS, review `Documentation/EC2.md` first. In short: **EC2 G4** is the recommended path for full local CUDA benchmark runs (after GPU runtime setup), while **EC2 T4g** is suitable for CPU-only or remote-inference benchmark topologies, not local CUDA F5 runs.
+
 ## Swift migration (in progress)
 
 To start moving server-side logic from Python to Swift, this repository now
