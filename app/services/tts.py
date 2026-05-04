@@ -10,8 +10,10 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 import time
 import subprocess
+import platform
 import tempfile
 import wave
 from concurrent.futures import ThreadPoolExecutor
@@ -184,6 +186,27 @@ class F5MLXLocalSpeechSynthesizer:
         )
 
 
+@dataclass(frozen=True)
+class F5CUDALocalSpeechSynthesizer:
+    """Local CUDA F5-TTS implementation of :class:`SpeechSynthesizer`."""
+
+    backend_name: str = "f5_cuda_local"
+
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        language: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> np.ndarray:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            _executor,
+            partial(_synthesize_f5_cuda_local_sync, text, voice=voice, language=language, options=options),
+        )
+
+
 @dataclass
 class FallbackSpeechSynthesizer:
     """Wrap a primary synthesizer with a fallback synthesizer."""
@@ -305,24 +328,63 @@ def _build_backend_synthesizer(backend: str) -> SpeechSynthesizer:
         return F5HTTPSpeechSynthesizer()
     if normalized == "f5_mlx_local":
         return F5MLXLocalSpeechSynthesizer()
+    if normalized == "f5_cuda_local":
+        return F5CUDALocalSpeechSynthesizer()
     return PiperSpeechSynthesizer()
 
 
+def _is_apple_silicon() -> bool:
+    return platform.system() == "Darwin" and platform.machine().lower() in {"arm64", "aarch64"}
+
+
+def _host_has_cuda() -> bool:
+    try:
+        import torch  # noqa: PLC0415
+
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
+def _resolve_runtime_tts_backends() -> tuple[str, str]:
+    backend = settings.tts_backend.lower()
+    fallback = settings.tts_fallback_backend.lower()
+
+    if backend == "auto":
+        backend = "piper"
+
+    if fallback == "auto":
+        if _is_apple_silicon():
+            fallback = "none"
+        elif _host_has_cuda():
+            fallback = "f5_cuda_local"
+        else:
+            fallback = "none"
+
+    if fallback == backend:
+        fallback = "none"
+
+    return backend, fallback
+
+
 def _build_synthesizer() -> SpeechSynthesizer:
-    primary = _build_backend_synthesizer(settings.tts_backend)
-    if settings.tts_fallback_backend != "piper" or primary.backend_name == "piper":
+    backend, fallback = _resolve_runtime_tts_backends()
+    primary = _build_backend_synthesizer(backend)
+    if fallback == "none" or primary.backend_name == fallback:
         return primary
-    return FallbackSpeechSynthesizer(primary=primary, fallback=PiperSpeechSynthesizer())
+    fallback_synth = _build_backend_synthesizer(fallback)
+    return FallbackSpeechSynthesizer(primary=primary, fallback=fallback_synth)
 
 
 def build_session_synthesizer() -> SpeechSynthesizer:
     """Build a synthesizer suitable for one call session with sticky fallback."""
-    primary = _build_backend_synthesizer(settings.tts_backend)
-    if settings.tts_fallback_backend != "piper" or primary.backend_name == "piper":
+    backend, fallback = _resolve_runtime_tts_backends()
+    primary = _build_backend_synthesizer(backend)
+    if fallback == "none" or primary.backend_name == fallback:
         return primary
     return SessionStickyFallbackSpeechSynthesizer(
         primary=primary,
-        fallback=PiperSpeechSynthesizer(),
+        fallback=_build_backend_synthesizer(fallback),
     )
 
 
@@ -330,7 +392,8 @@ def _resolve_observed_backend_name(synthesizer: SpeechSynthesizer) -> str:
     observed = getattr(synthesizer, "last_call_backend_name", "")
     if observed:
         return str(observed)
-    return getattr(synthesizer, "backend_name", settings.tts_backend)
+    resolved_backend, _resolved_fallback = _resolve_runtime_tts_backends()
+    return getattr(synthesizer, "backend_name", resolved_backend)
 
 
 def _resolve_observed_fallback_used(synthesizer: SpeechSynthesizer) -> bool:
@@ -409,7 +472,7 @@ _F5_MLX_SAMPLE_RATE = 24000
 
 def _select_voice(voice: str | None, language: str | None, backend: str) -> VoiceSelection:
     """Resolve requested voice/language to backend-specific voice selection."""
-    if backend in ("f5_http", "f5_mlx_local"):
+    if backend in ("f5_http", "f5_mlx_local", "f5_cuda_local"):
         voice_id = _resolve_f5_voice(language=language, requested_voice=voice)
         return VoiceSelection(
             voice_id=voice_id,
@@ -589,6 +652,82 @@ def _synthesize_f5_mlx_local_sync(
     samples, sample_rate = _decode_wav_or_pcm16(wav_bytes, _F5_MLX_SAMPLE_RATE)
     if len(samples) == 0:
         raise EmptyOutputError("f5-tts-mlx produced empty audio")
+
+    return _resample_to_piper_rate(samples, sample_rate)
+
+
+def _f5_cuda_engine():
+    if not hasattr(_f5_cuda_engine, "_cache"):
+        try:
+            from f5_tts.api import F5TTS  # noqa: PLC0415
+        except ImportError as exc:
+            raise UnsupportedError(
+                "f5-tts is not installed. Install benchmark extras or add f5-tts to your environment."
+            ) from exc
+
+        if not settings.f5_cuda_ref_audio_path.strip() or not settings.f5_cuda_ref_audio_text.strip():
+            raise UnsupportedError(
+                "f5_cuda_local requires F5_CUDA_REF_AUDIO_PATH and F5_CUDA_REF_AUDIO_TEXT to be configured."
+            )
+
+        _f5_cuda_engine._cache = F5TTS(  # type: ignore[attr-defined]
+            model=settings.f5_cuda_model,
+            device=settings.f5_cuda_device,
+        )
+
+    return _f5_cuda_engine._cache  # type: ignore[attr-defined]
+
+
+def _synthesize_f5_cuda_local_sync(
+    text: str,
+    *,
+    voice: str | None = None,
+    language: str | None = None,
+    options: dict[str, Any] | None = None,
+) -> np.ndarray:
+    if not text.strip():
+        raise EmptyOutputError("Cannot synthesize empty text")
+
+    if not settings.f5_cuda_ref_audio_path.strip() or not settings.f5_cuda_ref_audio_text.strip():
+        raise UnsupportedError(
+            "f5_cuda_local requires F5_CUDA_REF_AUDIO_PATH and F5_CUDA_REF_AUDIO_TEXT to be configured."
+        )
+
+    if not os.path.exists(settings.f5_cuda_ref_audio_path):
+        raise UnsupportedError(
+            f"f5_cuda_local reference audio not found: {settings.f5_cuda_ref_audio_path}"
+        )
+
+    engine = _f5_cuda_engine()
+    normalized_options = _normalize_options(options)
+    speed = 1.0 / max(0.25, float(normalized_options.get("length_scale", 1.0)))
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp_wav:
+        try:
+            _wav, _sr, _spec = engine.infer(
+                ref_file=settings.f5_cuda_ref_audio_path,
+                ref_text=settings.f5_cuda_ref_audio_text,
+                gen_text=text,
+                nfe_step=settings.f5_cuda_nfe_step,
+                cfg_strength=settings.f5_cuda_cfg_strength,
+                speed=speed,
+                file_wave=tmp_wav.name,
+            )
+        except Exception as exc:
+            raise UnsupportedError(f"f5_cuda_local infer() failed: {exc}") from exc
+
+        try:
+            tmp_wav.seek(0)
+            wav_bytes = tmp_wav.read()
+        except Exception as exc:
+            raise UnsupportedError(f"Failed to read f5_cuda_local output WAV: {exc}") from exc
+
+    if not wav_bytes:
+        raise EmptyOutputError("f5_cuda_local produced no audio output")
+
+    samples, sample_rate = _decode_wav_or_pcm16(wav_bytes, _F5_MLX_SAMPLE_RATE)
+    if len(samples) == 0:
+        raise EmptyOutputError("f5_cuda_local produced empty audio")
 
     return _resample_to_piper_rate(samples, sample_rate)
 

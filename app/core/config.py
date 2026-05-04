@@ -101,10 +101,23 @@ class Settings(BaseSettings):
     vad_preroll_ms: int = 96
 
     # ── TTS ──────────────────────────────────────────────────────────────────
-    tts_backend: Literal["piper", "f5_http", "f5_mlx_local"] = "f5_http"
-    tts_fallback_backend: Literal["none", "piper"] = "piper"
+    # auto policy:
+    # - Apple Silicon: piper primary, no fallback
+    # - CUDA-capable Linux/Windows: piper primary, f5_cuda_local fallback
+    # - other hosts: piper primary, no fallback
+    tts_backend: Literal["auto", "piper", "f5_http", "f5_mlx_local", "f5_cuda_local"] = "auto"
+    tts_fallback_backend: Literal["auto", "none", "piper", "f5_http", "f5_mlx_local", "f5_cuda_local"] = "auto"
     # f5-tts-mlx model name (HuggingFace repo id); only used when tts_backend="f5_mlx_local"
     f5_mlx_model: str = "lucasnewman/f5-tts-mlx"
+    # f5-tts local CUDA settings; used when tts_backend or tts_fallback_backend is f5_cuda_local
+    f5_cuda_model: str = "F5TTS_v1_Base"
+    f5_cuda_device: str = "cuda"
+    f5_cuda_nfe_step: int = 16
+    f5_cuda_cfg_strength: float = 2.0
+    f5_cuda_speed: float = 1.0
+    # Reference prompt required by local f5-tts generation
+    f5_cuda_ref_audio_path: str = ""
+    f5_cuda_ref_audio_text: str = ""
     # F5 HTTP endpoint that accepts {text, voice, language, options}
     f5_tts_endpoint: str = "http://localhost:8880/synthesize"
     f5_tts_voice: str = "en_default"
