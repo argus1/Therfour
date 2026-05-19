@@ -338,10 +338,15 @@ Avoid ad hoc error shapes.
 ### Week 2 - Implementation + Validation
 
 #### Day 6-8: STT/TTS/RAG Implementation
-
 - STT: normalize preprocessing, confidence thresholds, and fallback behavior in `app/services/stt.py`.
 - TTS: standardize voice mapping and response metadata in `app/services/tts.py`.
 - RAG/LLM: align context assembly and prompt injection strategy in `app/services/llm.py`.
+  - [ ] **(Medium) Tune RAG similarity threshold to avoid empty-context turns (REG-001)**
+  - Change: lower `similarity_threshold` from **0.35 → 0.20** (then re-run retrieval eval/benchmarks).
+  - Rationale: Chroma benchmark findings show threshold=0.35 suppresses context for most query categories (hit rate ~0.20), even though the retrieval engine is stable/error-free.
+  - Acceptance: retrieval hit-rate improves materially across categories without introducing off-topic grounding; record updated numbers in `chroma_benchmark_regression_notes.md`.
+  - References: `deliverables/RAG_lock.md`, `deliverables/RAG_Parity_Therfour_vs_HealthCoacher_2026-04-15.md`, `deliverables/Parity_Matrix_Therfour_vs_HealthCoacher_2026-04-20.md`.
+
 - Telephony turn integration updates in `app/services/telephony.py` as needed.
 
 ### STT Input Normalization Plan
