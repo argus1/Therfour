@@ -1,0 +1,23 @@
+{
+  "voices": [
+    {
+      "id": "en-US-libritts-r-medium",
+      "model_path": "models/piper/en_US-libritts_r-medium.onnx",
+      "sample_rate": 22050,
+      "aliases": [
+        "libritts_r",
+        "libritts-r",
+        "libritts"
+      ]
+    },
+    {
+      "id": "en-US-amy-medium",
+      "model_path": "models/piper/en_US-amy-medium.onnx",
+      "sample_rate": 22050,
+      "aliases": [
+        "amy",
+        "amy-medium"
+      ]
+    }
+  ]
+}

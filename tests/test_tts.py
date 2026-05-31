@@ -63,7 +63,28 @@ async def test_synthesize_maps_ava_voice_alias_to_default_model() -> None:
 
     cmd = run_mock.call_args.args[0]
     model_index = cmd.index("--model") + 1
-    assert cmd[model_index] == tts_service.settings.piper_model_path
+    expected_model = tts_service._select_voice(
+        voice="en-US-AvaMultilingualNeural",
+        language="en-US",
+        backend="piper",
+    ).model_path
+    assert cmd[model_index] == expected_model
+
+
+def test_select_voice_uses_catalog_for_libritts_and_amy() -> None:
+    libritts = tts_service._select_voice(voice="libritts_r", language="en-US", backend="piper")
+    amy = tts_service._select_voice(voice="amy", language="en-US", backend="piper")
+
+    assert libritts.voice_id == "en-US-libritts-r-medium"
+    assert "en_US-libritts_r-medium.onnx" in libritts.model_path
+    assert amy.voice_id == "en-US-amy-medium"
+    assert "en_US-amy-medium.onnx" in amy.model_path
+
+
+def test_select_voice_defaults_to_configured_default_not_lessac() -> None:
+    selected = tts_service._select_voice(voice=None, language="en-US", backend="piper")
+
+    assert selected.voice_id == "en-US-libritts-r-medium"
 
 
 @pytest.mark.asyncio

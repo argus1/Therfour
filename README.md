@@ -57,15 +57,21 @@ flowchart TD
 pip install -r requirements.txt
 ```
 
-### 2 – Download a Piper voice model
+### 2 – Download Piper voice models
 
 ```bash
 mkdir -p models
-# English (US) – lessac medium voice
-wget -q https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx \
-     -O models/en_US-lessac-medium.onnx
-wget -q https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json \
-     -O models/en_US-lessac-medium.onnx.json
+# English (US) – libritts_r medium voice (default)
+wget -q https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx \
+     -O models/en_US-libritts_r-medium.onnx
+wget -q https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx.json \
+     -O models/en_US-libritts_r-medium.onnx.json
+
+# English (US) – amy medium voice
+wget -q https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx \
+     -O models/en_US-amy-medium.onnx
+wget -q https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx.json \
+     -O models/en_US-amy-medium.onnx.json
 ```
 
 ### 3 – Pull an Ollama model
@@ -154,13 +160,15 @@ swift test
 All settings can be overridden via environment variables or a `.env` file.
 See `.env.example` for the full list with descriptions.
 
-| Variable            | Default                           | Description                               |
-| ------------------- | --------------------------------- | ----------------------------------------- |
-| `WHISPER_MODEL`     | `small`                           | faster-whisper model size                 |
-| `WHISPER_LANGUAGE`  | _(auto-detect)_                   | Pin transcription language                |
-| `PIPER_BINARY`      | `piper`                           | Path to the Piper executable              |
-| `PIPER_MODEL_PATH`  | `models/en_US-lessac-medium.onnx` | Piper voice model                         |
-| `OLLAMA_MODEL`      | `llama3.2:3b`                     | Ollama model tag                          |
-| `OLLAMA_BASE_URL`   | `http://localhost:11434`          | Ollama API base URL                       |
-| `SILENCE_TIMEOUT_S` | `1.5`                             | Seconds of silence before turn processing |
-| `PUBLIC_HOST`       | `localhost`                       | Hostname used in the TwiML `<Stream>` URL |
+| Variable                   | Default                               | Description                               |
+| -------------------------- | ------------------------------------- | ----------------------------------------- |
+| `WHISPER_MODEL`            | `small`                               | faster-whisper model size                 |
+| `WHISPER_LANGUAGE`         | _(auto-detect)_                       | Pin transcription language                |
+| `PIPER_BINARY`             | `piper`                               | Path to the Piper executable              |
+| `PIPER_MODEL_PATH`         | `models/en_US-libritts_r-medium.onnx` | Piper fallback voice model path           |
+| `PIPER_DEFAULT_VOICE_ID`   | `en-US-libritts-r-medium`             | Default Piper voice id                    |
+| `PIPER_VOICES_CONFIG_PATH` | `app/core/piper_voices.json`          | Piper voice catalog config                |
+| `OLLAMA_MODEL`             | `llama3.2:3b`                         | Ollama model tag                          |
+| `OLLAMA_BASE_URL`          | `http://localhost:11434`              | Ollama API base URL                       |
+| `SILENCE_TIMEOUT_S`        | `1.5`                                 | Seconds of silence before turn processing |
+| `PUBLIC_HOST`              | `localhost`                           | Hostname used in the TwiML `<Stream>` URL |

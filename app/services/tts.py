@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import os
 import time
@@ -19,6 +20,7 @@ import wave
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 import httpx
@@ -32,8 +34,7 @@ logger = logging.getLogger(__name__)
 
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="tts")
 
-# Piper outputs 22 050 Hz by default for the lessac-medium voice.
-# Update this constant if you use a different voice model.
+# Canonical output sample rate for the downstream telephony audio pipeline.
 PIPER_SAMPLE_RATE = 22050
 
 
@@ -46,15 +47,29 @@ class VoiceSelection:
     sample_rate: int
 
 
-_DEFAULT_VOICE_ID = "en-US-lessac-medium"
+_LIBRITTS_VOICE_ID = "en-US-libritts-r-medium"
+_AMY_VOICE_ID = "en-US-amy-medium"
+_LESSAC_VOICE_ID = "en-US-lessac-medium"
 _VOICE_ALIASES = {
-    "en-us-lessac-medium": _DEFAULT_VOICE_ID,
-    "en_us-lessac-medium": _DEFAULT_VOICE_ID,
-    "en_us_lessac_medium": _DEFAULT_VOICE_ID,
-    "lessac": _DEFAULT_VOICE_ID,
-    "en-us-avamultilingualneural": _DEFAULT_VOICE_ID,
-    "en-us-ava": _DEFAULT_VOICE_ID,
-    "ava": _DEFAULT_VOICE_ID,
+    "en-us-libritts-r-medium": _LIBRITTS_VOICE_ID,
+    "en_us-libritts_r-medium": _LIBRITTS_VOICE_ID,
+    "en_us_libritts_r_medium": _LIBRITTS_VOICE_ID,
+    "libritts-r": _LIBRITTS_VOICE_ID,
+    "libritts_r": _LIBRITTS_VOICE_ID,
+    "libritts": _LIBRITTS_VOICE_ID,
+    "en-us-amy-medium": _AMY_VOICE_ID,
+    "en_us-amy-medium": _AMY_VOICE_ID,
+    "en_us_amy_medium": _AMY_VOICE_ID,
+    "amy-medium": _AMY_VOICE_ID,
+    "amy": _AMY_VOICE_ID,
+    "en-us-lessac-medium": _LESSAC_VOICE_ID,
+    "en_us-lessac-medium": _LESSAC_VOICE_ID,
+    "en_us_lessac_medium": _LESSAC_VOICE_ID,
+    "lessac": _LESSAC_VOICE_ID,
+    # Legacy provider aliases map to the configured default Piper voice family.
+    "en-us-avamultilingualneural": _LIBRITTS_VOICE_ID,
+    "en-us-ava": _LIBRITTS_VOICE_ID,
+    "ava": _LIBRITTS_VOICE_ID,
     "en_default": "en_default",
     "fa_default": "fa_default",
     "zh_mandarin_default": "zh_mandarin_default",
@@ -90,6 +105,19 @@ _DEFAULT_F5_VOICE_BY_LANGUAGE = {
     "yue": "zh_cantonese_default",
     "ja": "ja_default",
 }
+
+
+@dataclass(frozen=True)
+class PiperVoiceModel:
+    """Piper voice catalog entry loaded from JSON configuration."""
+
+    voice_id: str
+    model_path: str
+    sample_rate: int
+
+
+_PIPER_VOICE_CATALOG_CACHE_KEY: tuple[str, float] | None = None
+_PIPER_VOICE_CATALOG: dict[str, PiperVoiceModel] = {}
 
 
 class SpeechSynthesizer(Protocol):
@@ -442,9 +470,117 @@ def _classify_tts_exception(exc: Exception) -> TTSFailureReason:
 
 def _normalize_voice_id(voice: str | None) -> str:
     if not voice:
-        return _DEFAULT_VOICE_ID
+        configured_default = (settings.piper_default_voice_id or _LIBRITTS_VOICE_ID).strip()
+        return configured_default
     normalized = voice.strip().replace("_", "-").lower()
     return _VOICE_ALIASES.get(normalized, voice.strip())
+
+
+def _normalize_piper_catalog_key(value: str) -> str:
+    return value.strip().replace("_", "-").lower()
+
+
+def _legacy_default_piper_voice() -> PiperVoiceModel:
+    default_voice = _normalize_voice_id(None)
+    return PiperVoiceModel(
+        voice_id=default_voice,
+        model_path=settings.piper_model_path,
+        sample_rate=PIPER_SAMPLE_RATE,
+    )
+
+
+def _load_piper_voice_catalog() -> dict[str, PiperVoiceModel]:
+    global _PIPER_VOICE_CATALOG_CACHE_KEY, _PIPER_VOICE_CATALOG
+
+    config_path = Path(settings.piper_voices_config_path)
+    try:
+        stat = config_path.stat()
+    except FileNotFoundError:
+        _PIPER_VOICE_CATALOG_CACHE_KEY = None
+        _PIPER_VOICE_CATALOG = {}
+        return {}
+
+    cache_key = (str(config_path.resolve()), stat.st_mtime)
+    if _PIPER_VOICE_CATALOG_CACHE_KEY == cache_key:
+        return _PIPER_VOICE_CATALOG
+
+    try:
+        with config_path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception as exc:
+        logger.warning("Failed to load Piper voices config '%s': %s", config_path, exc)
+        _PIPER_VOICE_CATALOG_CACHE_KEY = cache_key
+        _PIPER_VOICE_CATALOG = {}
+        return {}
+
+    voices = payload.get("voices")
+    if not isinstance(voices, list):
+        logger.warning("Piper voices config '%s' is missing a valid 'voices' list", config_path)
+        _PIPER_VOICE_CATALOG_CACHE_KEY = cache_key
+        _PIPER_VOICE_CATALOG = {}
+        return {}
+
+    catalog: dict[str, PiperVoiceModel] = {}
+    for entry in voices:
+        if not isinstance(entry, dict):
+            continue
+
+        voice_id = str(entry.get("id", "")).strip()
+        model_path = str(entry.get("model_path", "")).strip()
+        if not voice_id or not model_path:
+            continue
+
+        sample_rate_raw = entry.get("sample_rate", PIPER_SAMPLE_RATE)
+        try:
+            sample_rate = int(sample_rate_raw)
+        except (TypeError, ValueError):
+            sample_rate = PIPER_SAMPLE_RATE
+
+        voice = PiperVoiceModel(
+            voice_id=voice_id,
+            model_path=model_path,
+            sample_rate=sample_rate,
+        )
+        catalog[_normalize_piper_catalog_key(voice_id)] = voice
+
+        aliases = entry.get("aliases", [])
+        if isinstance(aliases, list):
+            for alias in aliases:
+                if not alias:
+                    continue
+                catalog[_normalize_piper_catalog_key(str(alias))] = voice
+
+    _PIPER_VOICE_CATALOG_CACHE_KEY = cache_key
+    _PIPER_VOICE_CATALOG = catalog
+    return catalog
+
+
+def _resolve_piper_voice(requested_voice: str | None) -> PiperVoiceModel:
+    requested = _normalize_voice_id(requested_voice)
+    requested_key = _normalize_piper_catalog_key(requested)
+
+    catalog = _load_piper_voice_catalog()
+    if not catalog:
+        return _legacy_default_piper_voice()
+
+    if requested_voice:
+        selected = catalog.get(requested_key)
+        if selected:
+            return selected
+
+    default_voice = _normalize_voice_id(None)
+    default_key = _normalize_piper_catalog_key(default_voice)
+    selected_default = catalog.get(default_key)
+    if selected_default:
+        if requested_voice:
+            logger.warning("Unsupported TTS voice '%s'; falling back to %s", requested, selected_default.voice_id)
+        return selected_default
+
+    # Fall back to the first catalog entry if configured default voice is missing.
+    selected_default = next(iter(catalog.values()))
+    if requested_voice:
+        logger.warning("Unsupported TTS voice '%s'; falling back to %s", requested, selected_default.voice_id)
+    return selected_default
 
 
 def _normalize_language(language: str | None) -> str:
@@ -480,17 +616,15 @@ def _select_voice(voice: str | None, language: str | None, backend: str) -> Voic
             sample_rate=_F5_MLX_SAMPLE_RATE,
         )
 
-    requested = _normalize_voice_id(voice)
-    if requested != _DEFAULT_VOICE_ID:
-        logger.warning("Unsupported TTS voice '%s'; falling back to %s", requested, _DEFAULT_VOICE_ID)
+    selected_piper_voice = _resolve_piper_voice(voice)
 
     if language and not language.lower().startswith("en"):
         logger.warning("Unsupported TTS language '%s'; falling back to en-US voice", language)
 
     return VoiceSelection(
-        voice_id=_DEFAULT_VOICE_ID,
-        model_path=settings.piper_model_path,
-        sample_rate=PIPER_SAMPLE_RATE,
+        voice_id=selected_piper_voice.voice_id,
+        model_path=selected_piper_voice.model_path,
+        sample_rate=selected_piper_voice.sample_rate,
     )
 
 

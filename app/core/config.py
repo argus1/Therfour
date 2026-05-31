@@ -125,7 +125,12 @@ class Settings(BaseSettings):
     f5_tts_sample_rate: int = 24000
 
     # Piper fallback/default backend settings
-    piper_model_path: str = "models/piper/en_US-lessac-medium.onnx"
+    # Legacy single-model path used when no voice catalog entry is resolved.
+    piper_model_path: str = "models/piper/en_US-libritts_r-medium.onnx"
+    # Default Piper voice id selected when voice is omitted or unsupported.
+    piper_default_voice_id: str = "en-US-libritts-r-medium"
+    # JSON catalog path that maps Piper voice ids/aliases to model paths.
+    piper_voices_config_path: str = "app/core/piper_voices.json"
     piper_binary: str = "piper"
 
     # ── LLM – Ollama ─────────────────────────────────────────────────────────
