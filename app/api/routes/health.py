@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.core.config import settings
 from app.models.schemas import HealthResponse
+from app.services.llm_backends import llm_service_label
 
 router = APIRouter()
 
@@ -17,6 +18,6 @@ async def health_check() -> HealthResponse:
         services={
             "stt": f"faster-whisper/{settings.whisper_model}",
             "tts": settings.tts_backend,
-            "llm": f"ollama/{settings.ollama_model}",
+            "llm": llm_service_label(settings.llm_provider),
         },
     )

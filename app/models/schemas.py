@@ -411,7 +411,7 @@ class CallSimulationReportRequest(BaseModel):
     opening_message: str = (
         "Hi, this is Terris. I am here with you. What name would you like me to use for you today?"
     )
-    caller_provider: Literal["ollama", "lmstudio"] = "ollama"
+    caller_provider: Literal["ollama", "lmstudio", "openai"] = "ollama"
     caller_base_url: str = ""
     caller_model_name_override: str = ""
     caller_timeout_s: float = Field(default=30.0, ge=1.0, le=300.0)
@@ -463,7 +463,12 @@ class CallSimulationReportFileResponse(BaseModel):
     report: dict[str, Any]
 
 
-def make_health_response(app_version: str, whisper_model: str, ollama_model: str) -> HealthResponse:
+def make_health_response(
+    app_version: str,
+    whisper_model: str,
+    llm_provider: str,
+    llm_model: str,
+) -> HealthResponse:
     """Construct the API health payload from app/runtime backend settings."""
     return HealthResponse(
         status="ok",
@@ -471,6 +476,6 @@ def make_health_response(app_version: str, whisper_model: str, ollama_model: str
         services={
             "stt": f"faster-whisper/{whisper_model}",
             "tts": "piper",
-            "llm": f"ollama/{ollama_model}",
+            "llm": f"{llm_provider}/{llm_model}",
         },
     )

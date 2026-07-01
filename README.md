@@ -39,7 +39,7 @@ flowchart TD
 | Telephony   | [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams) |
 | STT         | [faster-whisper](https://github.com/SYSTRAN/faster-whisper)             |
 | TTS         | [Piper](https://github.com/rhasspy/piper)                               |
-| LLM         | [Ollama](https://ollama.com) (local, any model)                         |
+| LLM         | [Ollama](https://ollama.com), LM Studio, or OpenAI-compatible providers |
 | Audio codec | Python `audioop` / `audioop-lts` + SciPy                                |
 
 ## Quick start
@@ -48,7 +48,7 @@ flowchart TD
 
 - Python 3.11+
 - [Piper binary](https://github.com/rhasspy/piper/releases) on your `$PATH`
-- [Ollama](https://ollama.com) running locally with your chosen model pulled
+- One LLM backend configured: [Ollama](https://ollama.com), LM Studio, or OpenAI
 - A Twilio account with a voice-capable phone number
 
 ### 1 – Install Python dependencies
@@ -168,7 +168,14 @@ See `.env.example` for the full list with descriptions.
 | `PIPER_MODEL_PATH`         | `models/en_US-libritts_r-medium.onnx` | Piper fallback voice model path           |
 | `PIPER_DEFAULT_VOICE_ID`   | `en-US-libritts-r-medium`             | Default Piper voice id                    |
 | `PIPER_VOICES_CONFIG_PATH` | `app/core/piper_voices.json`          | Piper voice catalog config                |
+| `LLM_PROVIDER`             | `ollama`                              | LLM backend: `ollama`, `lmstudio`, `openai` |
+| `LLM_TIMEOUT`              | `60.0`                                | Shared LLM request timeout (seconds)      |
 | `OLLAMA_MODEL`             | `llama3.2:3b`                         | Ollama model tag                          |
 | `OLLAMA_BASE_URL`          | `http://localhost:11434`              | Ollama API base URL                       |
+| `LMSTUDIO_MODEL`           | _(none)_                              | LM Studio model name                      |
+| `LMSTUDIO_BASE_URL`        | `http://10.0.0.132:1234/v1`           | LM Studio OpenAI-compatible endpoint      |
+| `OPENAI_MODEL`             | `gpt-4o-mini`                         | OpenAI chat model name                    |
+| `OPENAI_BASE_URL`          | `https://api.openai.com/v1`           | OpenAI-compatible API base URL            |
+| `OPENAI_API_KEY`           | _(empty)_                             | Required when `LLM_PROVIDER=openai`       |
 | `SILENCE_TIMEOUT_S`        | `1.5`                                 | Seconds of silence before turn processing |
 | `PUBLIC_HOST`              | `localhost`                           | Hostname used in the TwiML `<Stream>` URL |

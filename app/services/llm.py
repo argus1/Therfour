@@ -1,7 +1,7 @@
-"""LLM service backed by Ollama for harm-reduction response generation.
+"""LLM service for harm-reduction response generation.
 
-Ollama exposes a local OpenAI-compatible API.  All inference runs on-device;
-no data is sent to external servers.  See https://ollama.com for setup.
+Supports local providers (Ollama, LM Studio) and optional online providers
+via OpenAI-compatible APIs.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import AsyncIterator, Optional
 import httpx
 
 from app.core.config import settings
-from app.services.llm_backends import get_backend
+from app.services.llm_backends import get_backend, llm_timeout_seconds
 from app.services import rag
 from app.services import transfer_services
 from app.services.turn_strategy import TurnStrategy
@@ -171,15 +171,17 @@ async def generate(
     strategy: Optional[str] = None,
     rag_allowed: Optional[bool] = None,
 ) -> str:
-    """Send *messages* to Ollama and return the assistant reply as a string."""
+    """Send *messages* to the configured LLM provider and return assistant text."""
     turn = await _construct_turn(messages, strategy=strategy, rag_allowed=rag_allowed)
     backend = get_backend(settings.llm_provider)
     payload = backend.payload(turn.messages, stream=False)
+    headers = backend.headers()
 
-    async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
+    async with httpx.AsyncClient(timeout=llm_timeout_seconds()) as client:
         resp = await client.post(
             backend.endpoint(),
             json=payload,
+            headers=headers,
         )
         resp.raise_for_status()
         raw_text = backend.extract_text(resp.json())
@@ -191,17 +193,19 @@ async def generate_stream(
     strategy: Optional[str] = None,
     rag_allowed: Optional[bool] = None,
 ) -> AsyncIterator[str]:
-    """Stream response tokens from Ollama one chunk at a time."""
+    """Stream response tokens from the configured LLM provider."""
     turn = await _construct_turn(messages, strategy=strategy, rag_allowed=rag_allowed)
     backend = get_backend(settings.llm_provider)
     payload = backend.payload(turn.messages, stream=True)
+    headers = backend.headers()
     streamed_tokens: list[str] = []
 
-    async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
+    async with httpx.AsyncClient(timeout=llm_timeout_seconds()) as client:
         async with client.stream(
             "POST",
             backend.endpoint(),
             json=payload,
+            headers=headers,
         ) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():
