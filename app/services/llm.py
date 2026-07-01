@@ -14,7 +14,7 @@ from typing import AsyncIterator, Optional
 import httpx
 
 from app.core.config import settings
-from app.services.llm_backends import get_backend
+from app.services.llm_backends import get_backend, llm_timeout_seconds
 from app.services import rag
 from app.services import transfer_services
 from app.services.turn_strategy import TurnStrategy
@@ -176,10 +176,11 @@ async def generate(
     backend = get_backend(settings.llm_provider)
     payload = backend.payload(turn.messages, stream=False)
 
-    async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
+    async with httpx.AsyncClient(timeout=llm_timeout_seconds()) as client:
         resp = await client.post(
             backend.endpoint(),
             json=payload,
+            headers=backend.headers(),
         )
         resp.raise_for_status()
         raw_text = backend.extract_text(resp.json())
@@ -197,11 +198,12 @@ async def generate_stream(
     payload = backend.payload(turn.messages, stream=True)
     streamed_tokens: list[str] = []
 
-    async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
+    async with httpx.AsyncClient(timeout=llm_timeout_seconds()) as client:
         async with client.stream(
             "POST",
             backend.endpoint(),
             json=payload,
+            headers=backend.headers(),
         ) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():

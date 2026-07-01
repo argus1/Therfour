@@ -120,11 +120,15 @@ class Settings(BaseSettings):
     piper_voices_config_path: str = "app/core/piper_voices.json"
     piper_binary: str = "piper"
 
-    # ── LLM – Ollama ─────────────────────────────────────────────────────────
-    llm_provider: Literal["ollama", "lmstudio"] = "ollama"
+    # ── LLM ──────────────────────────────────────────────────────────────────
+    llm_provider: Literal["ollama", "lmstudio", "openai"] = "ollama"
+    # Request timeout shared by all LLM providers.
+    llm_timeout: float = 60.0
     # Keep this separate so LM Studio can be phased out for a custom interface later.
     llm_temperature: float = 0.0
     llm_max_history_messages: int = 8
+
+    # ── LLM – Ollama ─────────────────────────────────────────────────────────
     ollama_base_url: str = "http://localhost:11434"
     # Name Ollama knows the model by (used in every /api/chat request).
     ollama_model: str = "qwen3.5-35b-a3b:q2-k-xl"
@@ -138,6 +142,11 @@ class Settings(BaseSettings):
     # ── LLM – LM Studio (temporary backend target) ─────────────────────────
     lmstudio_base_url: str = "http://10.0.0.132:1234/v1"
     lmstudio_model: str = "deepseek-r1-distill-qwen-7b-uncensored-reasoner-i1"
+
+    # ── LLM – OpenAI (online) ───────────────────────────────────────────────
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-4o-mini"
+    openai_api_key: str = ""
 
     # ── RAG ─────────────────────────────────────────────────────────────────
     rag_enabled: bool = False
