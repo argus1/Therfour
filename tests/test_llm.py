@@ -238,61 +238,6 @@ async def test_generate_uses_lmstudio_endpoint_and_response_shape(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_generate_uses_openai_endpoint_with_bearer_auth(monkeypatch) -> None:
-    mock_response = MagicMock()
-    mock_response.raise_for_status = MagicMock()
-    mock_response.json.return_value = {
-        "choices": [
-            {
-                "message": {
-                    "content": "You are not alone. Let's focus on your immediate safety."
-                }
-            }
-        ]
-    }
-
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(return_value=mock_response)
-
-    monkeypatch.setattr(llm_service.settings, "llm_provider", "openai")
-    monkeypatch.setattr(llm_service.settings, "openai_base_url", "https://api.openai.com/v1")
-    monkeypatch.setattr(llm_service.settings, "openai_model", "gpt-4o-mini")
-    monkeypatch.setattr(llm_service.settings, "openai_api_key", "test-key")
-    monkeypatch.setattr(llm_service.settings, "rag_enabled", False)
-
-    with patch("app.services.llm.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        result = await llm_service.generate([
-            {"role": "user", "content": "I feel overwhelmed"}
-        ])
-
-    called_url = mock_client.post.await_args.args[0]
-    called_headers = mock_client.post.await_args.kwargs["headers"]
-    payload = mock_client.post.await_args.kwargs["json"]
-
-    assert called_url.endswith("/chat/completions")
-    assert called_headers["Authorization"] == "Bearer test-key"
-    assert payload["model"] == "gpt-4o-mini"
-    assert payload["stream"] is False
-    assert isinstance(result, str)
-    assert "safety" in result.lower()
-
-
-@pytest.mark.asyncio
-async def test_generate_openai_raises_when_api_key_missing(monkeypatch) -> None:
-    monkeypatch.setattr(llm_service.settings, "llm_provider", "openai")
-    monkeypatch.setattr(llm_service.settings, "openai_api_key", "")
-    monkeypatch.setattr(llm_service.settings, "rag_enabled", False)
-
-    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-        await llm_service.generate([
-            {"role": "user", "content": "hello"}
-        ])
-
-
-@pytest.mark.asyncio
 async def test_construct_turn_suppresses_rag_for_rapport_strategy(monkeypatch) -> None:
     monkeypatch.setattr(llm_service.settings, "rag_enabled", True)
 

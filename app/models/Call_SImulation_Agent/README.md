@@ -50,7 +50,7 @@ async def main() -> None:
             use_live_therfour_llm=False,
         ),
         caller_model=CallerModelConfig(
-            provider="ollama",  # or "lmstudio" or "openai"
+            provider="ollama",
         ),
     )
     report = await agent.run()

@@ -547,12 +547,11 @@ def test_make_health_response_utility() -> None:
     response = make_health_response(
         app_version="1.2.3",
         whisper_model="medium",
-        llm_provider="openai",
-        llm_model="gpt-4o-mini",
+        ollama_model="llama3.2:3b"
     )
 
     assert response.status == "ok"
     assert response.version == "1.2.3"
     assert response.services["stt"] == "faster-whisper/medium"
     assert response.services["tts"] == "piper"
-    assert response.services["llm"] == "openai/gpt-4o-mini"
+    assert response.services["llm"] == "ollama/llama3.2:3b"

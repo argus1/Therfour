@@ -49,8 +49,6 @@ class CallerModelConfig:
             return self.base_url.rstrip("/")
         if self.provider == "lmstudio":
             return settings.lmstudio_base_url.rstrip("/")
-        if self.provider == "openai":
-            return settings.openai_base_url.rstrip("/")
         return settings.ollama_base_url.rstrip("/")
 
     def resolved_model_name(self) -> str:
@@ -488,7 +486,7 @@ class CallSimulationAgent:
         model_name = self.caller_model.resolved_model_name()
         base_url = self.caller_model.resolved_base_url()
 
-        if self.caller_model.provider in {"lmstudio", "openai"}:
+        if self.caller_model.provider == "lmstudio":
             payload: dict[str, Any] = {
                 "model": model_name,
                 "messages": messages,
@@ -496,16 +494,8 @@ class CallSimulationAgent:
                 "stream": False,
             }
             endpoint = f"{base_url}/chat/completions"
-            headers: dict[str, str] = {}
-            if self.caller_model.provider == "openai":
-                api_key = settings.openai_api_key.strip()
-                if not api_key:
-                    raise ValueError(
-                        "OPENAI_API_KEY must be set when caller_provider=openai"
-                    )
-                headers = {"Authorization": f"Bearer {api_key}"}
             async with httpx.AsyncClient(timeout=self.caller_model.timeout_s) as client:
-                resp = await client.post(endpoint, json=payload, headers=headers)
+                resp = await client.post(endpoint, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
                 choices = data.get("choices") or []
